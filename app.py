@@ -23,12 +23,16 @@ Estrutura criada por evento (v1.3, numeração global):
     05_RAW\<Profissional>\
   Cópias, em <pasta-de-copias>\<AAAA-MM-DD>_<Nome do evento>\
   (ou no próprio primário, se a pasta de cópias não for definida)
-    02_Fotos_JPG_Copia\<Profissional>\
-    04_Videos_Copia\<Profissional>\
-    06_RAW_Copia\<Profissional>\
+    02_Fotos_JPG_Copia\<Profissional>\Cartao_N\
+    04_Videos_Copia\<Profissional>\Cartao_N\
+    06_RAW_Copia\<Profissional>\Cartao_N\
+  (v1.4) Cada descarga é uma leva Cartao_1, Cartao_2... por
+  profissional; arquivo já presente numa leva anterior não é
+  duplicado na leva nova. Checklist em checklist-descargas.csv.
   Relatório: relatorio-descarga.txt na pasta primária.
 """
 
+import csv
 import hashlib
 import json
 import os
@@ -44,7 +48,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -106,20 +110,98 @@ def scan_source(source):
     return files, others
 
 
-def destinations_for(event_root, professional, copy_event_root=None):
+def destinations_for(event_root, professional, copy_event_root=None, leva=None):
     """Destinos primários (01, 03, 05) em event_root e cópias
     (02, 04, 06) em copy_event_root — ou em event_root, se a pasta
-    de cópias não for definida (fallback para D:)."""
+    de cópias não for definida (fallback para D:).
+    Com leva (v1.4): .../<Profissional>/Cartao_N/<arquivo>."""
     prof = sanitize(professional)
     copy_root = copy_event_root if copy_event_root is not None else event_root
+    sub = Path(prof) / f"Cartao_{leva}" if leva is not None else Path(prof)
     return {
-        "jpg_sync": event_root / FOLDERS["jpg_sync"] / prof,
-        "jpg_copy": copy_root / FOLDERS["jpg_copy"] / prof,
-        "video_sync": event_root / FOLDERS["video_sync"] / prof,
-        "video_copy": copy_root / FOLDERS["video_copy"] / prof,
-        "raw_backup": event_root / FOLDERS["raw_backup"] / prof,
-        "raw_copy": copy_root / FOLDERS["raw_copy"] / prof,
+        "jpg_sync": event_root / FOLDERS["jpg_sync"] / sub,
+        "jpg_copy": copy_root / FOLDERS["jpg_copy"] / sub,
+        "video_sync": event_root / FOLDERS["video_sync"] / sub,
+        "video_copy": copy_root / FOLDERS["video_copy"] / sub,
+        "raw_backup": event_root / FOLDERS["raw_backup"] / sub,
+        "raw_copy": copy_root / FOLDERS["raw_copy"] / sub,
     }
+
+
+def next_leva_number(event_root, professional):
+    """Próximo Cartao_N para o profissional no evento (1 se nenhum)."""
+    prof = sanitize(professional)
+    max_n = 0
+    for key in ("jpg_sync", "video_sync", "raw_backup"):
+        prof_dir = event_root / FOLDERS[key] / prof
+        if not prof_dir.is_dir():
+            continue
+        for d in prof_dir.iterdir():
+            if d.is_dir() and d.name.startswith("Cartao_"):
+                try:
+                    max_n = max(max_n, int(d.name.split("_", 1)[1]))
+                except (ValueError, IndexError):
+                    pass
+    return max_n + 1
+
+
+def _same_file(path, size, src_hash):
+    if not path.is_file():
+        return False
+    try:
+        if path.stat().st_size != size:
+            return False
+    except OSError:
+        return False
+    if src_hash is None:
+        return True
+    try:
+        return file_hash(path) == src_hash
+    except OSError:
+        return False
+
+
+def already_in_previous_leva(name, size, src_hash, primary_dir, secondary_dir):
+    """True se o arquivo já está, idêntico, numa leva anterior do
+    mesmo profissional — no primário e, se houver cópia, na cópia
+    correspondente. Evita duplicar a mesma foto numa leva nova."""
+    if not primary_dir.name.startswith("Cartao_"):
+        return False
+    prof_dir = primary_dir.parent
+    if not prof_dir.is_dir():
+        return False
+    for sibling in prof_dir.iterdir():
+        if not sibling.is_dir() or sibling.name == primary_dir.name:
+            continue
+        if not sibling.name.startswith("Cartao_"):
+            continue
+        if not _same_file(sibling / name, size, src_hash):
+            continue
+        if secondary_dir is None:
+            return True
+        copy_prev = secondary_dir.parent / sibling.name / name
+        if _same_file(copy_prev, size, src_hash):
+            return True
+    return False
+
+
+def list_removable_drives():
+    """Unidades removíveis plugadas (Windows). [] fora do Windows."""
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+        drives = []
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i in range(26):
+            if bitmask & (1 << i):
+                letter = chr(ord("A") + i) + ":\\"
+                # DRIVE_REMOVABLE = 2
+                if ctypes.windll.kernel32.GetDriveTypeW(letter) == 2:
+                    drives.append(letter)
+        return drives
+    except Exception:
+        return []
 
 
 def split_needed(files, copy_jpg=True, copy_video=True, copy_raw=True):
@@ -319,7 +401,7 @@ def save_config(data):
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
                  copy_video=True, copy_raw=True, verify_hash=False, log=None):
-    """Descarga com staging (v1.2, estrutura v1.3).
+    """Descarga com staging (v1.4: leva Cartao_N).
 
     1) Copia cada arquivo do cartão para .staging (fora das pastas de sync).
     2) Depois da conferência, move (renomeia, rápido, na mesma unidade)
@@ -370,6 +452,17 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
             primary_dir, secondary_dir = dests["video_sync"], (dests["video_copy"] if copy_video else None)
         else:
             primary_dir, secondary_dir = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
+        # Já descarregado numa leva anterior? Pula sem duplicar.
+        if already_in_previous_leva(src.name, _size, src_hash, primary_dir, secondary_dir):
+            try:
+                staged.unlink()
+            except OSError:
+                pass
+            tally("skipped", src, primary_dir)
+            if secondary_dir is not None:
+                tally("skipped", src, secondary_dir)
+            emit(f"Já em leva anterior: {src.name} (pulou)")
+            continue
         try:
             action, primary = move_one(staged, primary_dir)
         except Exception as exc:  # noqa: BLE001
@@ -438,7 +531,7 @@ def run_copy(files, dests, copy_jpg=True, copy_video=True, log=None):
     return report
 
 
-def write_report(event_root, professional, source, files, report):
+def write_report(event_root, professional, source, files, report, leva=None):
     event_root.mkdir(parents=True, exist_ok=True)
     path = event_root / "relatorio-descarga.txt"
     counts = {}
@@ -448,7 +541,7 @@ def write_report(event_root, professional, source, files, report):
         "",
         "=" * 60,
         f"Descarga: {datetime.now():%Y-%m-%d %H:%M:%S}",
-        f"Profissional: {professional}",
+        f"Profissional: {professional}" + (f"  •  Leva: Cartao_{leva}" if leva is not None else ""),
         f"Origem (cartão): {source}",
         f"Evento: {event_root}",
         f"Encontrados: JPG={counts.get('jpg', 0)} "
@@ -464,6 +557,69 @@ def write_report(event_root, professional, source, files, report):
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     return path
+
+
+HISTORY_HEADER = ["data_hora", "profissional", "leva", "origem",
+                  "jpg", "raw", "video", "copiados", "pulados", "falhas", "devolvido"]
+
+
+def history_path(event_root):
+    return Path(event_root) / "checklist-descargas.csv"
+
+
+def append_history(event_root, professional, leva, source, files, report):
+    """Registra a descarga no checklist do evento (CSV, legível no Excel)."""
+    try:
+        event_root.mkdir(parents=True, exist_ok=True)
+        path = history_path(event_root)
+        counts = {}
+        for _p, kind, _s in files:
+            counts[kind] = counts.get(kind, 0) + 1
+        new_file = not path.exists()
+        with open(path, "a", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh)
+            if new_file:
+                w.writerow(HISTORY_HEADER)
+            w.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                professional, f"Cartao_{leva}", source,
+                counts.get("jpg", 0), counts.get("raw", 0), counts.get("video", 0),
+                report["copied"], report["skipped"], report["failed"], "não",
+            ])
+    except OSError:
+        pass
+
+
+def read_history(event_root):
+    path = history_path(event_root)
+    if not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh))
+        return [r for r in rows if r.get("profissional")]
+    except (OSError, csv.Error):
+        return []
+
+
+def mark_history_returned(event_root, index):
+    """Marca a linha `index` do checklist como cartão devolvido."""
+    path = history_path(event_root)
+    if not path.exists():
+        return False
+    try:
+        with open(path, encoding="utf-8", newline="") as fh:
+            rows = list(csv.reader(fh))
+        if len(rows) < 2 or index + 1 >= len(rows):
+            return False
+        header = rows[0]
+        dev_idx = header.index("devolvido") if "devolvido" in header else len(header) - 1
+        rows[index + 1][dev_idx] = "sim"
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            csv.writer(fh).writerows(rows)
+        return True
+    except (OSError, csv.Error, ValueError):
+        return False
 
 
 def resource_path(rel):
@@ -518,6 +674,7 @@ class App:
         self.source_var = tk.StringVar()
         ttk.Entry(row, textvariable=self.source_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Button(row, text="Procurar...", command=self._pick_source).pack(side="left", **pad)
+        ttk.Button(row, text="Cartões plugados...", command=self._pick_removable).pack(side="left", **pad)
 
         ttk.Label(frm, text="2) Evento").pack(anchor="w")
         row = ttk.Frame(frm)
@@ -584,6 +741,16 @@ class App:
         ttk.Button(qbtns, text="Limpar fila", command=self.clear_queue).pack(fill="x", **pad)
         ttk.Button(qbtns, text="Descarregar fila", command=self.start_queue).pack(fill="x", **pad)
 
+        ttk.Label(frm, text="Checklist do evento — quem já descarregou").pack(anchor="w")
+        crow = ttk.Frame(frm)
+        crow.pack(fill="x")
+        self.checklist_list = tk.Listbox(crow, height=4)
+        self.checklist_list.pack(side="left", fill="x", expand=True, **pad)
+        cbtns = ttk.Frame(crow)
+        cbtns.pack(side="left")
+        ttk.Button(cbtns, text="Atualizar", command=self.refresh_checklist).pack(fill="x", **pad)
+        ttk.Button(cbtns, text="Marcar cartão devolvido", command=self.mark_returned_selected).pack(fill="x", **pad)
+
         self.preview_var = tk.StringVar(value="Clique em “Analisar cartão” para ver o que será copiado.")
         ttk.Label(frm, textvariable=self.preview_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
@@ -611,6 +778,57 @@ class App:
         d = filedialog.askdirectory(title="Escolha a pasta base das cópias (02, 04, 06)")
         if d:
             self.external_var.set(d)
+
+    def _pick_removable(self):
+        drives = list_removable_drives()
+        if not drives:
+            messagebox.showinfo("Cartões", "Nenhuma unidade removível encontrada. Use “Procurar...” para escolher a pasta do cartão.")
+            return
+        win = tk.Toplevel(self.root)
+        win.title("Cartões plugados")
+        lst = tk.Listbox(win, height=min(8, len(drives)))
+        lst.pack(fill="both", expand=True, padx=10, pady=10)
+        for d in drives:
+            lst.insert("end", d)
+        lst.selection_set(0)
+
+        def use_selected():
+            sel = lst.curselection()
+            if sel:
+                self.source_var.set(drives[sel[0]])
+                win.destroy()
+
+        lst.bind("<Double-Button-1>", lambda _e: use_selected())
+        ttk.Button(win, text="Usar selecionado", command=use_selected).pack(pady=(0, 10))
+
+    def refresh_checklist(self):
+        try:
+            root = self._event_root()
+        except ValueError:
+            return
+        self.checklist_list.delete(0, "end")
+        for r in read_history(root):
+            self.checklist_list.insert(
+                "end",
+                f"{r.get('data_hora', '')}  |  {r.get('profissional', '')}  |  {r.get('leva', '')}  |  "
+                f"JPG={r.get('jpg', '')} RAW={r.get('raw', '')} Vídeo={r.get('video', '')}  |  "
+                f"falhas={r.get('falhas', '')}  |  Devolvido: {r.get('devolvido', '')}")
+
+    def mark_returned_selected(self):
+        sel = self.checklist_list.curselection()
+        if not sel:
+            messagebox.showinfo("Checklist", "Selecione uma linha do checklist primeiro.")
+            return
+        try:
+            root = self._event_root()
+        except ValueError as exc:
+            messagebox.showerror("Evento", str(exc))
+            return
+        if mark_history_returned(root, sel[0]):
+            self.refresh_checklist()
+            self._log("Checklist: cartão marcado como devolvido.")
+        else:
+            messagebox.showerror("Checklist", "Não foi possível marcar essa linha.")
 
     def _log(self, msg):
         self.log.insert("end", msg + "\n")
@@ -688,10 +906,11 @@ class App:
         if ext_base:
             ext_free = free_space_for(ext_base)
             ext_txt = f"\nCópias (02, 04, 06): {fmt_bytes(ext_need)}  •  Livre na pasta de cópias: {fmt_bytes(ext_free) if ext_free is not None else 'não foi possível verificar'}"
+        leva_preview = next_leva_number(root, self.prof_var.get().strip())
         self.preview_var.set(
             f"Encontrados: JPG={counts.get('jpg', 0)}  RAW={counts.get('raw', 0)}  "
             f"Vídeo={counts.get('video', 0)}  Outros ignorados={self.others}\n"
-            f"Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}\n"
+            f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}\n"
             f"Destino primário: {root}"
         )
         self._log(f"Análise: {counts} | outros={self.others} | primário={fmt_bytes(primary)} | cópias={fmt_bytes(copy_total)} | livre D:={free_txt} | par JPG/RAW sem par: {jpg_no_raw}/{raw_no_jpg}")
@@ -729,8 +948,11 @@ class App:
         done = 0
         ext_base = self.external_var.get().strip()
         copy_event_root = (Path(ext_base) / root.name) if ext_base else None
+        allocated = {}
         for source, prof, files, _others in jobs:
-            dests = destinations_for(root, prof, copy_event_root)
+            leva = next_leva_number(root, prof) + allocated.get(prof, 0)
+            allocated[prof] = allocated.get(prof, 0) + 1
+            dests = destinations_for(root, prof, copy_event_root, leva=leva)
             report = process_card(
                 files, dests, root, prof,
                 copy_jpg=self.copy_jpg_var.get(),
@@ -742,7 +964,9 @@ class App:
             for k in ("copied", "skipped", "failed"):
                 total_report[k] += report[k]
             total_report["errors"].extend(report["errors"])
-            write_report(root, prof, source, files, report)
+            write_report(root, prof, source, files, report, leva=leva)
+            append_history(root, prof, leva, source, files, report)
+            self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
             done += len(files)
             self.msg_queue.put(("progress", done))
             self.msg_queue.put(("log", f"Cartão {prof}: copiados={report['copied']} pulados={report['skipped']} falhas={report['failed']}"))
@@ -843,6 +1067,7 @@ class App:
                 elif kind == "done":
                     report, report_path = payload
                     self.copying = False
+                    self.refresh_checklist()
                     self.btn_copy.config(state="normal")
                     self.btn_scan.config(state="normal")
                     self._log(f"Concluído: copiados={report['copied']} pulados={report['skipped']} "

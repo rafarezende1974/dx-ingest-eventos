@@ -1,3 +1,26 @@
+# DX Ingest Eventos v1.4.0 — levas, checklist e cartões plugados
+
+- **Leva por cartão (opção 2):** cada descarga de um profissional
+  vira `Cartao_1`, `Cartao_2`... dentro da pasta dele, em todas
+  as pastas (01 a 06). Ex.: `01_Fotos_JPG\Fotografo_01\Cartao_1\`.
+  A próxima leva é automática, pelo maior número já existente.
+  Arquivo já descarregado numa leva anterior (mesmo nome e
+  tamanho, e hash se a verificação estiver ligada) NÃO é
+  duplicado na leva nova — só os arquivos novos são copiados.
+- **Checklist do evento (opção 3):** cada descarga é registrada
+  em `checklist-descargas.csv` dentro da pasta do evento
+  (data/hora, profissional, leva, origem, JPG/RAW/vídeo,
+  copiados, pulados, falhas, devolvido). Na tela, a lista do
+  evento mostra quem já descarregou, e o botão "Marcar cartão
+  devolvido" marca a linha selecionada como devolvida.
+- **Cartões plugados (opção 4):** botão "Cartões plugados..."
+  ao lado da origem lista as unidades removíveis do Windows
+  (E:, F:...); é só escolher uma como origem, em vez de
+  procurar a pasta na mão. A prévia já mostra qual leva
+  (Cartao_N) será usada na próxima descarga.
+- Atenção: eventos antigos, sem Cartao_N, continuam como
+  estavam — só os novos usam levas.
+
 # DX Ingest Eventos v1.3.0 — cópias em outra unidade/pasta
 
 - **Nova estrutura, numeração global:** primário fica em D:,
