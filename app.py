@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",

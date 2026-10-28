@@ -1,3 +1,21 @@
+# Editor Assistente v1.5.2 — exe renomeado
+
+- O arquivo .exe passa a se chamar **`EditorAssistente.exe`**
+  (antes: `DXIngestEventos.exe`), e o artefato do build passa
+  a se chamar **`editor-assistente`**.
+- Para isso valer no build, é preciso atualizar o workflow
+  `.github/workflows/build-windows.yml` pela web (a integração
+  do Muse não tem permissão de Workflows, como nas outras
+  vezes): trocar `--name DXIngestEventos` por
+  `--name EditorAssistente`, `name: dx-ingest-eventos` por
+  `name: editor-assistente` e `path: dist/DXIngestEventos.exe`
+  por `path: dist/EditorAssistente.exe`. O arquivo
+  `WORKFLOW-BUILD-WINDOWS.yml.txt` deste projeto já está com
+  essas 3 trocas prontas para colar.
+- O arquivo de configuração ao lado do .exe continua se
+  chamando `dx-ingest-config.json` de propósito, para não
+  perder os profissionais e pastas já salvos.
+
 # Editor Assistente v1.5.1 — novo nome do aplicativo
 
 - A partir desta versão o aplicativo passa a se chamar
