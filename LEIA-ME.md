@@ -1,3 +1,21 @@
+# DX Ingest Eventos v1.3.0 — cópias em outra unidade/pasta
+
+- **Nova estrutura, numeração global:** primário fica em D:,
+  cópias vão para outra unidade ou pasta a definir.
+  - D: (primário): `01_Fotos_JPG`, `03_Videos`, `05_RAW`
+  - Cópias: `02_Fotos_JPG_Copia`, `04_Videos_Copia`, `06_RAW_Copia`
+  - Os nomes não têm mais "Sincronizar" nem "Backup".
+  - Se a pasta de cópias estiver vazia na tela, as cópias
+    continuam em D:, nos mesmos números 02, 04 e 06, para
+    não perder a cópia por esquecimento.
+  - Pastas de eventos antigos (01_Sincronizar etc.) não são
+    migradas automaticamente — só os novos eventos usam a
+    estrutura nova.
+- O espaço livre agora é conferido separadamente: D: para o
+  primário, pasta de cópias para as cópias.
+- Novo checkbox "Cópia do RAW (06)", ao lado de JPG (02) e
+  vídeo (04).
+
 # DX Ingest Eventos v1.2.0 — "quero tudo"
 
 - **Splash sem borda branca:** a janela do splash agora usa cor-chave

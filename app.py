@@ -16,14 +16,17 @@ Regras da v1 (confirmadas pelo Rafael em 2026-10-28):
   fotógrafo/cinegrafista.
 - Ao final, confere por quantidade e tamanho e gera relatório.
 
-Estrutura criada por evento:
-  <base>\<AAAA-MM-DD>_<Nome do evento>\
-    01_Fotos_JPG_Sincronizar\<Profissional>\
+Estrutura criada por evento (v1.3, numeração global):
+  Primário, em <base>\<AAAA-MM-DD>_<Nome do evento>\
+    01_Fotos_JPG\<Profissional>\
+    03_Videos\<Profissional>\
+    05_RAW\<Profissional>\
+  Cópias, em <pasta-de-copias>\<AAAA-MM-DD>_<Nome do evento>\
+  (ou no próprio primário, se a pasta de cópias não for definida)
     02_Fotos_JPG_Copia\<Profissional>\
-    03_Videos_Sincronizar\<Profissional>\
     04_Videos_Copia\<Profissional>\
-    05_RAW_Backup\<Profissional>\
-    relatorio-descarga.txt
+    06_RAW_Copia\<Profissional>\
+  Relatório: relatorio-descarga.txt na pasta primária.
 """
 
 import hashlib
@@ -41,7 +44,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -50,11 +53,13 @@ VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi",
               ".wmv", ".mkv", ".mpg", ".mpeg", ".insv"}
 
 FOLDERS = {
-    "jpg_sync": "01_Fotos_JPG_Sincronizar",
+    # Numeração global: ímpar = primário (D:), par = cópia (outra unidade/pasta).
+    "jpg_sync": "01_Fotos_JPG",
     "jpg_copy": "02_Fotos_JPG_Copia",
-    "video_sync": "03_Videos_Sincronizar",
+    "video_sync": "03_Videos",
     "video_copy": "04_Videos_Copia",
-    "raw_backup": "05_RAW_Backup",
+    "raw_backup": "05_RAW",
+    "raw_copy": "06_RAW_Copia",
 }
 
 
@@ -101,15 +106,34 @@ def scan_source(source):
     return files, others
 
 
-def destinations_for(event_root, professional):
+def destinations_for(event_root, professional, copy_event_root=None):
+    """Destinos primários (01, 03, 05) em event_root e cópias
+    (02, 04, 06) em copy_event_root — ou em event_root, se a pasta
+    de cópias não for definida (fallback para D:)."""
     prof = sanitize(professional)
+    copy_root = copy_event_root if copy_event_root is not None else event_root
     return {
         "jpg_sync": event_root / FOLDERS["jpg_sync"] / prof,
-        "jpg_copy": event_root / FOLDERS["jpg_copy"] / prof,
+        "jpg_copy": copy_root / FOLDERS["jpg_copy"] / prof,
         "video_sync": event_root / FOLDERS["video_sync"] / prof,
-        "video_copy": event_root / FOLDERS["video_copy"] / prof,
+        "video_copy": copy_root / FOLDERS["video_copy"] / prof,
         "raw_backup": event_root / FOLDERS["raw_backup"] / prof,
+        "raw_copy": copy_root / FOLDERS["raw_copy"] / prof,
     }
+
+
+def split_needed(files, copy_jpg=True, copy_video=True, copy_raw=True):
+    """Retorna (bytes primário, bytes cópia)."""
+    primary = sum(s for _p, _k, s in files)
+    copy_total = 0
+    for _p, kind, s in files:
+        if kind == "jpg" and copy_jpg:
+            copy_total += s
+        elif kind == "video" and copy_video:
+            copy_total += s
+        elif kind == "raw" and copy_raw:
+            copy_total += s
+    return primary, copy_total
 
 
 def needed_bytes(files, copy_jpg=True, copy_video=True):
@@ -294,14 +318,13 @@ def save_config(data):
 
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
-                 copy_video=True, verify_hash=False, external_raw_dir=None, log=None):
-    """Descarga com staging (v1.2).
+                 copy_video=True, copy_raw=True, verify_hash=False, log=None):
+    """Descarga com staging (v1.2, estrutura v1.3).
 
     1) Copia cada arquivo do cartão para .staging (fora das pastas de sync).
     2) Depois da conferência, move (renomeia, rápido, na mesma unidade)
-       para a pasta de sincronização/backup.
-    3) Só então copia para a pasta de cópia e, se configurado, para o
-       backup externo (só RAW).
+       para a pasta primária (01, 03, 05).
+    3) Só então copia para a pasta de cópia (02, 04, 06).
     O editor/sync só vê o arquivo quando ele já está completo no destino.
     Retorna relatório (dict).
     """
@@ -346,7 +369,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
         elif kind == "video":
             primary_dir, secondary_dir = dests["video_sync"], (dests["video_copy"] if copy_video else None)
         else:
-            primary_dir, secondary_dir = dests["raw_backup"], None
+            primary_dir, secondary_dir = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
         try:
             action, primary = move_one(staged, primary_dir)
         except Exception as exc:  # noqa: BLE001
@@ -365,16 +388,6 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                 action2 = "failed"
                 report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
             tally(action2, src, secondary_dir)
-        # 4) backup externo, só RAW
-        if kind == "raw" and external_raw_dir is not None:
-            ext_dir = Path(external_raw_dir) / prof
-            try:
-                ext_hash = file_hash(primary) if verify_hash else None
-                action3, _d = copy_one(primary, ext_dir, src_hash=ext_hash)
-            except Exception as exc:  # noqa: BLE001
-                action3 = "failed"
-                report["errors"].append(f"{src.name} -> {ext_dir}: {exc}")
-            tally(action3, src, ext_dir)
     # Limpa o staging se ficou vazio (o normal); se sobrou arquivo
     # com falha, mantém para investigação e registra no log.
     try:
@@ -530,7 +543,7 @@ class App:
         ttk.Entry(row, textvariable=self.base_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Button(row, text="Procurar...", command=self._pick_base).pack(side="left", **pad)
 
-        ttk.Label(frm, text="5) Backup externo opcional — só RAW (ex.: E:\\Backup)").pack(anchor="w")
+        ttk.Label(frm, text="5) Pasta das cópias (02, 04, 06) — outra unidade/pasta (ex.: E:\\Copias). Se vazia, as cópias ficam em D:").pack(anchor="w")
         row = ttk.Frame(frm)
         row.pack(fill="x")
         self.external_var = tk.StringVar(value=cfg.get("external_base", ""))
@@ -541,9 +554,11 @@ class App:
         opts.pack(fill="x", pady=4)
         self.copy_jpg_var = tk.BooleanVar(value=cfg.get("copy_jpg", True))
         self.copy_video_var = tk.BooleanVar(value=cfg.get("copy_video", True))
+        self.copy_raw_var = tk.BooleanVar(value=cfg.get("copy_raw", True))
         self.hash_var = tk.BooleanVar(value=cfg.get("verify_hash", False))
         ttk.Checkbutton(opts, text="Cópia do JPG (02)", variable=self.copy_jpg_var).pack(side="left", **pad)
         ttk.Checkbutton(opts, text="Cópia do vídeo (04)", variable=self.copy_video_var).pack(side="left", **pad)
+        ttk.Checkbutton(opts, text="Cópia do RAW (06)", variable=self.copy_raw_var).pack(side="left", **pad)
         ttk.Checkbutton(opts, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
 
         btns = ttk.Frame(frm)
@@ -593,7 +608,7 @@ class App:
             self.base_var.set(d)
 
     def _pick_external(self):
-        d = filedialog.askdirectory(title="Escolha a pasta base do backup externo (opcional)")
+        d = filedialog.askdirectory(title="Escolha a pasta base das cópias (02, 04, 06)")
         if d:
             self.external_var.set(d)
 
@@ -612,6 +627,7 @@ class App:
             "external_base": self.external_var.get().strip(),
             "copy_jpg": self.copy_jpg_var.get(),
             "copy_video": self.copy_video_var.get(),
+            "copy_raw": self.copy_raw_var.get(),
             "verify_hash": self.hash_var.get(),
             "professionals": profs[:10],
         })
@@ -655,27 +671,30 @@ class App:
         counts = {}
         for _p, kind, _s in self.scan:
             counts[kind] = counts.get(kind, 0) + 1
-        need = needed_bytes(self.scan, self.copy_jpg_var.get(), self.copy_video_var.get())
+        primary, copy_total = split_needed(self.scan, self.copy_jpg_var.get(), self.copy_video_var.get(), self.copy_raw_var.get())
+        ext_base = self.external_var.get().strip()
+        if ext_base:
+            d_need, ext_need = primary, copy_total
+        else:
+            d_need, ext_need = primary + copy_total, 0
         free = free_space_for(self.base_var.get().strip())
         free_txt = fmt_bytes(free) if free is not None else "não foi possível verificar"
-        ok = "OK — cabe no destino." if free is None or free >= need else "ATENÇÃO — pode faltar espaço em D:!"
+        ok = "OK — cabe em D:." if free is None or free >= d_need else "ATENÇÃO — pode faltar espaço em D:!"
         jpg_no_raw, raw_no_jpg = pair_alert(self.scan)
         pair_txt = ""
         if jpg_no_raw or raw_no_jpg:
             pair_txt = f"\nAlerta de par: JPG sem RAW={jpg_no_raw}  •  RAW sem JPG={raw_no_jpg}"
         ext_txt = ""
-        ext_base = self.external_var.get().strip()
         if ext_base:
-            raw_bytes = sum(s for _p, k, s in self.scan if k == "raw")
             ext_free = free_space_for(ext_base)
-            ext_txt = f"\nBackup externo RAW: {fmt_bytes(raw_bytes)}  •  Livre lá: {fmt_bytes(ext_free) if ext_free is not None else 'não foi possível verificar'}"
+            ext_txt = f"\nCópias (02, 04, 06): {fmt_bytes(ext_need)}  •  Livre na pasta de cópias: {fmt_bytes(ext_free) if ext_free is not None else 'não foi possível verificar'}"
         self.preview_var.set(
             f"Encontrados: JPG={counts.get('jpg', 0)}  RAW={counts.get('raw', 0)}  "
             f"Vídeo={counts.get('video', 0)}  Outros ignorados={self.others}\n"
-            f"Total a copiar (com as cópias): {fmt_bytes(need)}  •  Livre: {free_txt}  •  {ok}{pair_txt}{ext_txt}\n"
-            f"Destino: {root}"
+            f"Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}\n"
+            f"Destino primário: {root}"
         )
-        self._log(f"Análise: {counts} | outros={self.others} | a copiar={fmt_bytes(need)} | livre={free_txt} | par JPG/RAW sem par: {jpg_no_raw}/{raw_no_jpg}")
+        self._log(f"Análise: {counts} | outros={self.others} | primário={fmt_bytes(primary)} | cópias={fmt_bytes(copy_total)} | livre D:={free_txt} | par JPG/RAW sem par: {jpg_no_raw}/{raw_no_jpg}")
 
     def add_to_queue(self):
         source = self.source_var.get().strip()
@@ -708,18 +727,16 @@ class App:
         self.msg_queue.put(("total", max(1, total_files)))
         total_report = {"copied": 0, "skipped": 0, "failed": 0, "errors": []}
         done = 0
-        ext_root = None
         ext_base = self.external_var.get().strip()
+        copy_event_root = (Path(ext_base) / root.name) if ext_base else None
         for source, prof, files, _others in jobs:
-            dests = destinations_for(root, prof)
-            if ext_base:
-                ext_root = Path(ext_base) / root.name / FOLDERS["raw_backup"]
+            dests = destinations_for(root, prof, copy_event_root)
             report = process_card(
                 files, dests, root, prof,
                 copy_jpg=self.copy_jpg_var.get(),
                 copy_video=self.copy_video_var.get(),
+                copy_raw=self.copy_raw_var.get(),
                 verify_hash=self.hash_var.get(),
-                external_raw_dir=ext_root,
                 log=lambda m: self.msg_queue.put(("log", m)),
             )
             for k in ("copied", "skipped", "failed"):
@@ -742,12 +759,24 @@ class App:
         except ValueError as exc:
             messagebox.showerror("Evento", str(exc))
             return
-        need = sum(needed_bytes(files, self.copy_jpg_var.get(), self.copy_video_var.get()) for _s, _p, files, _o in jobs)
+        primaries, copies = 0, 0
+        for _s, _p, files, _o in jobs:
+            pr, cp = split_needed(files, self.copy_jpg_var.get(), self.copy_video_var.get(), self.copy_raw_var.get())
+            primaries += pr
+            copies += cp
+        ext_base = self.external_var.get().strip()
+        d_need = primaries if ext_base else primaries + copies
         free = free_space_for(self.base_var.get().strip())
-        if free is not None and free < need:
-            if not messagebox.askyesno("Espaço", f"Espaço livre ({fmt_bytes(free)}) é menor que o necessário "
-                                                 f"({fmt_bytes(need)}). Continuar mesmo assim?"):
+        if free is not None and free < d_need:
+            if not messagebox.askyesno("Espaço", f"Espaço livre em D: ({fmt_bytes(free)}) é menor que o necessário "
+                                                 f"({fmt_bytes(d_need)}). Continuar mesmo assim?"):
                 return
+        if ext_base:
+            ext_free = free_space_for(ext_base)
+            if ext_free is not None and ext_free < copies:
+                if not messagebox.askyesno("Espaço nas cópias", f"Espaço livre na pasta de cópias ({fmt_bytes(ext_free)}) é menor que o necessário "
+                                                     f"({fmt_bytes(copies)}). Continuar mesmo assim?"):
+                    return
         self._save_current_config()
         self.copying = True
         self.last_success = False
