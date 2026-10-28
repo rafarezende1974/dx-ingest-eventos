@@ -1,3 +1,12 @@
+# Editor Assistente v1.5.1 — novo nome do aplicativo
+
+- A partir desta versão o aplicativo passa a se chamar
+  **Editor Assistente** (antes: DX Ingest Eventos). Só o nome
+  na janela e na documentação mudou — nenhuma função mudou.
+- O arquivo .exe gerado pelo build atual ainda se chama
+  `DXIngestEventos.exe`; renomear o .exe exige uma edição no
+  workflow do GitHub Actions (feita pela web, como antes).
+
 # DX Ingest Eventos v1.5.0 — leva só na 01 (JPG)
 
 - **Leva por cartão, só na 01:** cada descarga de um profissional

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 r"""
-DX Ingest Eventos v1.0.0 — protótipo
+Editor Assistente — descarga de cartões em eventos
 Descarga de cartões em eventos, para Windows.
 
 Regras da v1 (confirmadas pelo Rafael em 2026-10-28):
@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -639,7 +639,7 @@ class App:
         self.config = load_config()
         self.queue_items = []  # [(origem, profissional)]
         self.last_success = False
-        root.title(f"DX Ingest Eventos v{VERSION}")
+        root.title(f"Editor Assistente v{VERSION}")
         # Ícone derivado do logo (diafragma + seta de descarga), se existir.
         try:
             icon_png = resource_path("assets/icon.png")
