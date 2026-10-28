@@ -16,13 +16,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
+      - name: Install PyInstaller + Pillow
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
+          pip install pyinstaller pillow
+
+      - name: Generate assets (logo + ícone derivado)
+        run: python generate_assets.py
 
       - name: Build EXE (PyInstaller, arquivo único)
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name DXIngestEventos app.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name DXIngestEventos --icon assets/icon.ico --add-data "assets/logo.png;assets" --add-data "assets/icon.png;assets" app.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
