@@ -1,4 +1,20 @@
-# DX Ingest Eventos v1.0.0 — protótipo
+# DX Ingest Eventos v1.1.0
+
+## Novidade da v1.1: logo e ícone
+
+- Ao abrir, o app mostra um splash com o logo audiovisual completo
+  (`#digaxiiiss`), que some sozinho em cerca de 1,5 segundo, sem
+  exigir clique.
+- O ícone do .exe e da janela é derivado do logo: o diafragma do
+  logo + uma seta de descarga, em preto e branco, legível em
+  tamanho pequeno.
+- Como a integração do GitHub só empurra texto, os arquivos binários
+  (PNG/ICO) NÃO vão ao repo: o `generate_assets.py` guarda o logo
+  em base64 (texto) e recria `assets/logo.png`, `assets/icon.png`
+  e `assets/icon.ico` no runner, antes do PyInstaller. O workflow
+  já inclui esse passo.
+
+# DX Ingest Eventos v1.0.0 — protótipo (base)
 
 Programa Windows para descarga de cartões em eventos. Copia, nunca move.
 Não apaga nem formata o cartão. Não sobe nada para o Drive por conta própria.

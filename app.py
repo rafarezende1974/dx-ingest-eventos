@@ -29,6 +29,7 @@ Estrutura criada por evento:
 import os
 import re
 import shutil
+import sys
 import threading
 import queue
 from datetime import datetime
@@ -37,7 +38,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -253,6 +254,12 @@ def write_report(event_root, professional, source, files, report):
     return path
 
 
+def resource_path(rel):
+    """Caminho de um asset, no dev e dentro do .exe (PyInstaller)."""
+    base = getattr(sys, "_MEIPASS", Path(__file__).parent)
+    return Path(base) / rel
+
+
 def fmt_bytes(n):
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:
@@ -265,6 +272,15 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title(f"DX Ingest Eventos v{VERSION}")
+        # Ícone derivado do logo (diafragma + seta de descarga), se existir.
+        try:
+            icon_png = resource_path("assets/icon.png")
+            if icon_png.exists():
+                photo = tk.PhotoImage(file=str(icon_png))
+                root.iconphoto(True, photo)
+                root._icon_photo = photo
+        except Exception:
+            pass
         root.geometry("760x640")
         root.minsize(680, 560)
         self.scan = []
@@ -500,9 +516,44 @@ class App:
             self._log(f"Pasta do evento: {root}")
 
 
+def show_splash(root):
+    """Splash com o logo completo: some sozinho, sem exigir clique."""
+    try:
+        path = resource_path("assets/logo.png")
+        if not path.exists():
+            return None
+        splash = tk.Toplevel(root)
+        splash.overrideredirect(True)
+        splash.configure(bg="white")
+        try:
+            from PIL import Image, ImageTk
+
+            img = Image.open(path).convert("RGBA")
+            img.thumbnail((360, 360), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+        except Exception:
+            photo = tk.PhotoImage(file=str(path))
+        label = tk.Label(splash, image=photo, bg="white")
+        label.image = photo
+        label.pack(padx=12, pady=12)
+        splash.update_idletasks()
+        x = (splash.winfo_screenwidth() - splash.winfo_width()) // 2
+        y = (splash.winfo_screenheight() - splash.winfo_height()) // 2
+        splash.geometry(f"+{x}+{y}")
+        return splash
+    except Exception:
+        return None
+
+
 def main():
     root = tk.Tk()
+    root.withdraw()
+    splash = show_splash(root)
     App(root)
+    if splash is not None:
+        root.after(1500, lambda: (splash.destroy(), root.deiconify()))
+    else:
+        root.deiconify()
     root.mainloop()
 
 
