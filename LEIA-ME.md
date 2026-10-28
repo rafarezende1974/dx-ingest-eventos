@@ -1,3 +1,37 @@
+# DX Ingest Eventos v1.2.0 — "quero tudo"
+
+- **Splash sem borda branca:** a janela do splash agora usa cor-chave
+  transparente no Windows, então só o círculo do logo aparece,
+  sem o quadrado branco em volta. Se o sistema não suportar
+  transparência, cai para fundo preto.
+- **Staging — pasta só pronta pro editor:** os arquivos vão
+  primeiro para `.staging` dentro da pasta do evento, fora das
+  pastas de sincronização. Só depois da conferência eles são
+  movidos (renomeados, rápidos, na mesma unidade) para as pastas
+  finais, e então copiados para as pastas de cópia. O editor/sync
+  nunca vê arquivo incompleto.
+- **Verificação por hash (opcional):** checkbox "Verificação
+  completa por hash". Quando ligada, confere o conteúdo (SHA-256)
+  das cópias novas e, se um arquivo já existente tiver o mesmo
+  tamanho mas conteúdo diferente (corrompido), ele é recopiado.
+  Mais lenta, use principalmente para RAW/backup.
+- **Alerta de par RAW/JPG:** na análise, avisa quantos JPG estão
+  sem RAW e quantos RAW estão sem JPG (mesmo nome base).
+- **Fila de cartões + perfis:** adicione vários cartões
+  (origem + profissional) à fila e descarregue um atrás do outro,
+  no mesmo evento. Profissionais, evento, pasta base e backup
+  externo ficam salvos em `dx-ingest-config.json` ao lado do .exe,
+  para não digitar tudo de novo no próximo evento.
+- **Backup externo opcional (só RAW):** informe uma pasta base
+  externa (ex.: `E:\Backup`) e o RAW vai também para lá, além
+  do backup em D:. A cópia em D: protege contra apagar sem
+  querer, não contra falha do HD D:.
+- **Som + ejetar com segurança:** som de conclusão diferente
+  de som de falha (Windows), e botão "Ejetar com segurança"
+  que só libera após descarga sem falhas — ele abre a janela
+  de remoção segura do Windows para escolher o cartão.
+- Extensão nova: vídeo Insta360 `.insv`.
+
 # DX Ingest Eventos v1.1.0
 
 ## Novidade da v1.1: logo e ícone
