@@ -1,6 +1,21 @@
+# DX Ingest Eventos v1.5.0 — leva só na 01 (JPG)
+
+- **Leva por cartão, só na 01:** cada descarga de um profissional
+  vira `Cartao_1`, `Cartao_2`... SÓ em `01_Fotos_JPG`, para o
+  2º profissional trabalhar por leva. Ex.:
+  `01_Fotos_JPG\Fotografo_01\Cartao_1\`.
+  As pastas 02 a 06 ficam planas, só por profissional, sem
+  Cartao_N: `02_Fotos_JPG_Copia\Fotografo_01\`,
+  `03_Videos\Fotografo_01\`, `05_RAW\Fotografo_01\` etc.
+  A próxima leva é automática, pelo maior número já existente
+  em 01. JPG já descarregado numa leva anterior (mesmo nome e
+  tamanho, e hash se a verificação estiver ligada) NÃO é
+  duplicado em 01 na leva nova — só os JPGs novos entram —,
+  mas a cópia plana em 02 é garantida.
+
 # DX Ingest Eventos v1.4.0 — levas, checklist e cartões plugados
 
-- **Leva por cartão (opção 2):** cada descarga de um profissional
+- **Leva por cartão (opção 2, v1.4 — superada pela v1.5):** cada descarga de um profissional
   vira `Cartao_1`, `Cartao_2`... dentro da pasta dele, em todas
   as pastas (01 a 06). Ex.: `01_Fotos_JPG\Fotografo_01\Cartao_1\`.
   A próxima leva é automática, pelo maior número já existente.

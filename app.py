@@ -26,9 +26,10 @@ Estrutura criada por evento (v1.3, numeração global):
     02_Fotos_JPG_Copia\<Profissional>\Cartao_N\
     04_Videos_Copia\<Profissional>\Cartao_N\
     06_RAW_Copia\<Profissional>\Cartao_N\
-  (v1.4) Cada descarga é uma leva Cartao_1, Cartao_2... por
-  profissional; arquivo já presente numa leva anterior não é
-  duplicado na leva nova. Checklist em checklist-descargas.csv.
+  (v1.5) Leva Cartao_1, Cartao_2... SÓ em 01_Fotos_JPG; as pastas
+  02 a 06 ficam planas por profissional. JPG já presente numa leva
+  anterior não é duplicado em 01, mas a cópia plana em 02 é
+  garantida. Checklist em checklist-descargas.csv.
   Relatório: relatorio-descarga.txt na pasta primária.
 """
 
@@ -48,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -114,25 +115,28 @@ def destinations_for(event_root, professional, copy_event_root=None, leva=None):
     """Destinos primários (01, 03, 05) em event_root e cópias
     (02, 04, 06) em copy_event_root — ou em event_root, se a pasta
     de cópias não for definida (fallback para D:).
-    Com leva (v1.4): .../<Profissional>/Cartao_N/<arquivo>."""
+    Leva (v1.5): SÓ a 01 (JPG) tem Cartao_N, para o 2º profissional
+    trabalhar por leva. As pastas 02 a 06 ficam planas, só por
+    profissional: .../<Profissional>/<arquivo>."""
     prof = sanitize(professional)
     copy_root = copy_event_root if copy_event_root is not None else event_root
-    sub = Path(prof) / f"Cartao_{leva}" if leva is not None else Path(prof)
+    jpg_sub = Path(prof) / f"Cartao_{leva}" if leva is not None else Path(prof)
     return {
-        "jpg_sync": event_root / FOLDERS["jpg_sync"] / sub,
-        "jpg_copy": copy_root / FOLDERS["jpg_copy"] / sub,
-        "video_sync": event_root / FOLDERS["video_sync"] / sub,
-        "video_copy": copy_root / FOLDERS["video_copy"] / sub,
-        "raw_backup": event_root / FOLDERS["raw_backup"] / sub,
-        "raw_copy": copy_root / FOLDERS["raw_copy"] / sub,
+        "jpg_sync": event_root / FOLDERS["jpg_sync"] / jpg_sub,
+        "jpg_copy": copy_root / FOLDERS["jpg_copy"] / prof,
+        "video_sync": event_root / FOLDERS["video_sync"] / prof,
+        "video_copy": copy_root / FOLDERS["video_copy"] / prof,
+        "raw_backup": event_root / FOLDERS["raw_backup"] / prof,
+        "raw_copy": copy_root / FOLDERS["raw_copy"] / prof,
     }
 
 
 def next_leva_number(event_root, professional):
-    """Próximo Cartao_N para o profissional no evento (1 se nenhum)."""
+    """Próximo Cartao_N para o profissional no evento (1 se nenhum).
+    A leva é contada só pela 01 (JPG), que é a única pasta com Cartao_N."""
     prof = sanitize(professional)
     max_n = 0
-    for key in ("jpg_sync", "video_sync", "raw_backup"):
+    for key in ("jpg_sync",):
         prof_dir = event_root / FOLDERS[key] / prof
         if not prof_dir.is_dir():
             continue
@@ -159,30 +163,6 @@ def _same_file(path, size, src_hash):
         return file_hash(path) == src_hash
     except OSError:
         return False
-
-
-def already_in_previous_leva(name, size, src_hash, primary_dir, secondary_dir):
-    """True se o arquivo já está, idêntico, numa leva anterior do
-    mesmo profissional — no primário e, se houver cópia, na cópia
-    correspondente. Evita duplicar a mesma foto numa leva nova."""
-    if not primary_dir.name.startswith("Cartao_"):
-        return False
-    prof_dir = primary_dir.parent
-    if not prof_dir.is_dir():
-        return False
-    for sibling in prof_dir.iterdir():
-        if not sibling.is_dir() or sibling.name == primary_dir.name:
-            continue
-        if not sibling.name.startswith("Cartao_"):
-            continue
-        if not _same_file(sibling / name, size, src_hash):
-            continue
-        if secondary_dir is None:
-            return True
-        copy_prev = secondary_dir.parent / sibling.name / name
-        if _same_file(copy_prev, size, src_hash):
-            return True
-    return False
 
 
 def list_removable_drives():
@@ -401,7 +381,7 @@ def save_config(data):
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
                  copy_video=True, copy_raw=True, verify_hash=False, log=None):
-    """Descarga com staging (v1.4: leva Cartao_N).
+    """Descarga com staging (v1.5: leva Cartao_N só em 01).
 
     1) Copia cada arquivo do cartão para .staging (fora das pastas de sync).
     2) Depois da conferência, move (renomeia, rápido, na mesma unidade)
@@ -452,17 +432,34 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
             primary_dir, secondary_dir = dests["video_sync"], (dests["video_copy"] if copy_video else None)
         else:
             primary_dir, secondary_dir = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
-        # Já descarregado numa leva anterior? Pula sem duplicar.
-        if already_in_previous_leva(src.name, _size, src_hash, primary_dir, secondary_dir):
-            try:
-                staged.unlink()
-            except OSError:
-                pass
-            tally("skipped", src, primary_dir)
-            if secondary_dir is not None:
-                tally("skipped", src, secondary_dir)
-            emit(f"Já em leva anterior: {src.name} (pulou)")
-            continue
+        # JPG, leva só em 01: se o JPG já está numa leva anterior,
+        # não duplica em 01, mas garante a cópia plana em 02.
+        if kind == "jpg" and primary_dir.name.startswith("Cartao_"):
+            prof_dir = primary_dir.parent
+            prev_found = False
+            if prof_dir.is_dir():
+                for sibling in prof_dir.iterdir():
+                    if (sibling.is_dir() and sibling.name.startswith("Cartao_")
+                            and sibling.name != primary_dir.name
+                            and _same_file(sibling / src.name, _size, src_hash)):
+                        prev_found = True
+                        break
+            if prev_found:
+                tally("skipped", src, primary_dir)
+                if secondary_dir is not None:
+                    try:
+                        sec_hash = src_hash
+                        action2, _d = copy_one(staged, secondary_dir, src_hash=sec_hash)
+                    except Exception as exc:  # noqa: BLE001
+                        action2 = "failed"
+                        report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
+                    tally(action2, src, secondary_dir)
+                try:
+                    staged.unlink()
+                except OSError:
+                    pass
+                emit(f"Já em leva anterior: {src.name} (pulou em 01)")
+                continue
         try:
             action, primary = move_one(staged, primary_dir)
         except Exception as exc:  # noqa: BLE001
