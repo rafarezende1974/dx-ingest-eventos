@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.8.3"
+VERSION = "2.0.0-dev.1"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -881,8 +881,8 @@ class App:
                 root._icon_photo = photo
         except Exception:
             pass
-        root.geometry("780x860")
-        root.minsize(680, 560)
+        root.geometry("1280x900")
+        root.minsize(1100, 650)
         self.scan = []
         self.others = 0
         self.suspects = []
@@ -895,6 +895,8 @@ class App:
 
     # ---------- interface ----------
     def _build(self):
+        from dashboard import mount_sidebar, mount_media_cards
+        mount_sidebar(self)
         pad = {"padx": 8, "pady": 4}
         # Janela rolável: o conteúdo é mais alto que a janela e, sem rolagem,
         # os cartões de destino e o progresso grande ficavam cortados (v1.8.1).
@@ -910,7 +912,7 @@ class App:
         self._canvas.bind_all("<MouseWheel>", lambda e: self._canvas.yview_scroll(-1 * int(e.delta / 120), "units"))
         cfg = self.config
         profs = cfg.get("professionals") or ["Fotografo_01", "Cinegrafista_01"]
-        self.theme_var = tk.StringVar(value=cfg.get("theme", "claro"))
+        self.theme_var = tk.StringVar(value=cfg.get("theme_v2", "escuro"))
 
         # Cabeçalho do evento (visual v1.7): cartão com evento, data e selo do profissional.
         self.header_frame = tk.Frame(frm, relief="flat", bd=0, highlightthickness=1,
@@ -926,6 +928,10 @@ class App:
                                      bg="#6B7280", fg="white", padx=14, pady=6)
         self.header_badge.pack(side="right", padx=12)
         ttk.Button(self.header_frame, text="Tema: claro/escuro", command=self._toggle_theme).pack(side="right", padx=(0, 4))
+
+        mount_media_cards(self, frm)
+        overview_anchor = ttk.Frame(frm)
+        overview_anchor.pack(fill="x")
 
         # 1) Evento em primeiro: é o que define a pasta do evento e não muda
         # durante o dia — por isso tem o botão de travar (v1.8.3).
@@ -1016,7 +1022,7 @@ class App:
         self._toggle_copy_options()
 
         btns = ttk.Frame(frm)
-        btns.pack(fill="x", pady=6)
+        btns.pack(fill="x", pady=6, before=overview_anchor)
         self.btn_scan = ttk.Button(btns, text="Analisar cartão", command=self.analyze)
         self.btn_scan.pack(side="left", **pad)
         self.btn_copy = ttk.Button(btns, text="Descarregar", command=self.start_copy, style="Accent.TButton")
@@ -1029,11 +1035,11 @@ class App:
         # Cartões de destino (visual do mockup): cartão branco com título dentro,
         # texto de espaço e barra verde — sem o LabelFrame antigo.
         cards = ttk.Frame(frm)
-        cards.pack(fill="x", pady=4)
+        cards.pack(fill="x", pady=4, before=overview_anchor)
         self.card_p_frame = tk.Frame(cards, relief="flat", bd=0, highlightthickness=1,
                                      highlightbackground="#E5E7EB")
         self.card_p_frame.pack(side="left", fill="both", expand=True, padx=(0, 4))
-        ttk.Label(self.card_p_frame, text="Primário (D:) — 01, 03, 05, 07", style="CardTitle.TLabel").pack(anchor="w", padx=10, pady=(8, 0))
+        ttk.Label(self.card_p_frame, text="DISCO PRIMÁRIO · 01 / 03 / 05 / 07", style="CardTitle.TLabel").pack(anchor="w", padx=10, pady=(8, 0))
         self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
         ttk.Label(self.card_p_frame, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=10, pady=4)
         self.space_bar = ttk.Progressbar(self.card_p_frame, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
@@ -1049,13 +1055,13 @@ class App:
 
         # Progresso grande (visual v1.7): barra alta + percentual + status.
         prow = ttk.Frame(frm)
-        prow.pack(fill="x", pady=6)
+        prow.pack(fill="x", pady=6, before=overview_anchor)
         self.progress_var = tk.StringVar(value="0%")
         ttk.Label(prow, textvariable=self.progress_var, font=("Segoe UI", 16, "bold")).pack(side="left", padx=(0, 10))
         self.progress = ttk.Progressbar(prow, mode="determinate", style="Green.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True)
         self.status_var = tk.StringVar(value="Pronto.")
-        ttk.Label(frm, textvariable=self.status_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
+        ttk.Label(frm, textvariable=self.status_var, wraplength=900, justify="left").pack(anchor="w", fill="x", before=overview_anchor, pady=(0, 18))
 
         ttk.Label(frm, text="Fila de cartões (um atrás do outro, mesmo evento)").pack(anchor="w")
         qrow = ttk.Frame(frm)
@@ -1239,6 +1245,9 @@ class App:
         style.configure("CardTitle.TLabel", background=th["card"], foreground=th["fg"], font=("Segoe UI", 10, "bold"))
         style.configure("Muted.Card.TLabel", background=th["card"], foreground=th["muted"])
         style.configure("Muted.TLabel", background=th["bg"], foreground=th["muted"])
+        from dashboard import polish_styles
+        polish_styles(self.root)
+        self._canvas.configure(bg=th["bg" ])
         style.configure("TButton", background=th["card"], foreground=th["fg"])
         style.configure("Accent.TButton", background=ACCENT, foreground="white")
         style.configure("TCheckbutton", background=th["bg"], foreground=th["fg"])
@@ -1286,7 +1295,7 @@ class App:
                 profs.insert(0, prof)
             self.config["professionals"] = profs[:10]
         self.config.update({
-            "theme": self.theme_var.get(),
+            "theme_v2": self.theme_var.get(),
             "mode": self.mode_var.get(),
             "base": self.base_var.get().strip(),
             "event": self.event_var.get().strip(),
@@ -1323,6 +1332,7 @@ class App:
         return True
 
     def analyze(self):
+        self.scan = []
         source = self.source_var.get().strip()
         if not source or not Path(source).is_dir():
             messagebox.showerror("Origem", "Escolha uma pasta de origem válida (o cartão).")
@@ -1339,6 +1349,8 @@ class App:
             messagebox.showerror("Origem", "Não use a pasta base D: como origem do cartão.")
             return
         self.scan, self.others = scan_source(source)
+        from dashboard import update_media_cards
+        update_media_cards(self, fmt_bytes)
         self.suspects = corruption_alerts(self.scan, source)
         self.rollover_post, self.rollover_warnings = rollover_split(self.scan)
         counts = {}
@@ -1552,6 +1564,10 @@ class App:
         self.root.after(200, self._poll)
 
     def start_copy(self):
+        if self.copying:
+            return
+        # A changed source must never reuse a previous card's scan.
+        self.scan = []
         if not self.scan:
             self.analyze()
             if not self.scan:
@@ -1717,6 +1733,14 @@ def show_splash(root):
 def main():
     root = tk.Tk()
     root.withdraw()
+    if "--smoke-test" in sys.argv:
+        # Exercise bundled widgets/theme/fonts without reading user configuration.
+        global load_config
+        load_config = lambda: {}
+        App(root)
+        root.update_idletasks()
+        root.destroy()
+        return
     splash = show_splash(root)
     App(root)
     if splash is not None:
