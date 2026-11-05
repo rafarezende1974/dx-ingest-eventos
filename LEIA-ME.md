@@ -1,3 +1,30 @@
+# Editor Assistente v1.6.0 — ideias do Descarrega (retomada, corrompido, contador zerado, espaço)
+
+- **Retomada persistente:** cada descarga conferida é registrada em
+  `manifest-descarga.json` na pasta do evento. Se a descarga parar no
+  meio (cabo, HD, luz) ou o mesmo cartão voltar, a próxima análise
+  mostra quantos arquivos já estão conferidos e quantos bytes faltam,
+  e a descarga pula os conferidos sem recopiar. Quem decide é o HD,
+  não a memória: só conta como conferido se o arquivo existir no
+  destino com o mesmo tamanho (e mesmo hash, quando a verificação
+  por hash estiver ligada). Se alguém apagar ou mover um arquivo do
+  HD, ele volta a ser copiado.
+- **Alerta de arquivo possivelmente corrompido/interrompido:** na
+  análise e no relatório, com o aviso "não formate o cartão antes
+  de ver". Sinais: tamanho 0; vídeo MP4/MOV sem o índice `moov`
+  nem no início nem no fim; vídeo com menos de 1 KB; arquivo
+  `.rsv`/`.tmp`/`.part` no cartão. É um alerta, não um laudo — o
+  arquivo é copiado mesmo assim, junto com o resto.
+- **Contador zerado (C9999 → C0001):** quando a câmera vira o
+  contador, o programa avisa na análise e no relatório e coloca
+  os arquivos pós-virada numa subpasta `ZEROU - A PARTIR DE C0001`
+  dentro da pasta de destino deles, sem renomear nada.
+- **Barra de espaço ao vivo:** na análise, uma barra mostra o
+  espaço livre/total em D: e, quando há pasta de cópias, o livre
+  e o necessário também na unidade das cópias.
+- Nada muda na estrutura 01–06, nas levas, no checklist nem nas
+  regras de segurança (copia, nunca move; nunca apaga/formata).
+
 # Editor Assistente v1.5.2 — exe renomeado
 
 - O arquivo .exe passa a se chamar **`EditorAssistente.exe`**

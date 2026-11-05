@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.5.2"
+VERSION = "1.6.0"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -356,6 +356,127 @@ def pair_alert(files):
     return len(jpg - raw), len(raw - jpg)
 
 
+def corruption_alerts(files, source_root=None):
+    """Arquivos que PODEM estar corrompidos/interrompidos (alerta, não laudo).
+
+    Sinais: tamanho 0; vídeo MP4/MOV sem o átomo 'moov' nem no início
+    nem no fim (lê só o 1º e o último 1 MB); vídeo com menos de 1 KB;
+    arquivo .rsv/.tmp/.part no cartão. O arquivo é copiado mesmo assim:
+    o alerta é para não formatar o cartão antes de ver.
+    Retorna [(nome, motivo)]."""
+    alerts = []
+    for path, kind, size in files:
+        name = Path(path).name
+        if size == 0:
+            alerts.append((name, "tamanho 0"))
+            continue
+        if kind == "video" and size < 1024:
+            alerts.append((name, "vídeo com menos de 1 KB"))
+            continue
+        if kind == "video" and Path(path).suffix.lower() in (".mp4", ".mov"):
+            try:
+                found = False
+                with open(path, "rb") as fh:
+                    head = fh.read(1024 * 1024)
+                    if b"moov" in head:
+                        found = True
+                    else:
+                        fh.seek(max(0, size - 1024 * 1024))
+                        if b"moov" in fh.read():
+                            found = True
+                if not found:
+                    alerts.append((name, "sem índice moov no início nem no fim (pode estar interrompido)"))
+            except OSError:
+                pass
+    # Arquivos de gravação interrompida que o classify() conta como Outros.
+    if source_root is not None:
+        for root, _dirs, names in os.walk(source_root):
+            for name in sorted(names):
+                if Path(name).suffix.lower() in (".rsv", ".tmp", ".part"):
+                    alerts.append((name, "arquivo de gravação interrompida (.rsv/.tmp/.part)"))
+    return alerts
+
+
+def rollover_split(files):
+    """Detecta a virada do contador (ex.: C9999 -> C0001).
+
+    Agrupa por (prefixo, tipo), ordena por data de modificação e procura
+    a queda do número de >=9900 para <=100. Retorna
+    {nome_do_arquivo: "ZEROU - A PARTIR DE <prefixo><numero>"} só para os
+    arquivos PÓS-virada, e a lista de avisos [(prefixo, primeiro_pós)].
+    Nada é renomeado; os pós-virada vão para uma subpasta com esse nome."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for path, kind, _size in files:
+        stem = Path(path).stem
+        m = re.search(r"(\d+)$", stem)
+        if not m:
+            continue
+        groups[(stem[:m.start()], kind)].append((path, int(m.group(1))))
+    post = {}
+    warnings = []
+    for (prefix, _kind), items in groups.items():
+        ordered = sorted(items, key=lambda x: (Path(x[0]).stat().st_mtime, Path(x[0]).name))
+        for i in range(1, len(ordered)):
+            prev_num = ordered[i - 1][1]
+            curr_num = ordered[i][1]
+            if prev_num >= 9900 and curr_num <= 100 and curr_num < prev_num:
+                first = ordered[i]
+                sub = f"ZEROU - A PARTIR DE {prefix}{curr_num:04d}"
+                warnings.append((prefix, curr_num))
+                for path, _num in ordered[i:]:
+                    post[Path(path).name] = sub
+                break
+    return post, warnings
+
+
+def manifest_path(event_root):
+    return Path(event_root) / "manifest-descarga.json"
+
+
+def load_manifest(event_root):
+    try:
+        data = json.loads(manifest_path(event_root).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_manifest(event_root, manifest):
+    try:
+        manifest_path(event_root).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def manifest_key(professional, kind, name, size):
+    return f"{sanitize(professional)}|{kind}|{name}|{size}"
+
+
+def manifest_entry(manifest, key):
+    entry = manifest.get(key)
+    return entry if isinstance(entry, dict) else None
+
+
+def is_verified(manifest, key, dest_paths, size, src_hash):
+    """Já conferido só se o manifest disser E os destinos existirem
+    no HD com o mesmo tamanho (e mesmo hash, quando há hash).
+    Quem decide é o HD, não a memória do programa."""
+    entry = manifest_entry(manifest, key)
+    if entry is None:
+        return False
+    if src_hash is not None and entry.get("hash") != src_hash:
+        return False
+    for dest in dest_paths:
+        try:
+            if not dest.is_file() or dest.stat().st_size != size:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def config_path():
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).parent
@@ -380,7 +501,8 @@ def save_config(data):
 
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
-                 copy_video=True, copy_raw=True, verify_hash=False, log=None):
+                 copy_video=True, copy_raw=True, verify_hash=False, log=None,
+                 manifest=None, rollover_post=None, suspects=None):
     """Descarga com staging (v1.5: leva Cartao_N só em 01).
 
     1) Copia cada arquivo do cartão para .staging (fora das pastas de sync).
@@ -393,6 +515,9 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
     report = {"copied": 0, "skipped": 0, "failed": 0, "errors": []}
     prof = sanitize(professional)
     staging_root = event_root / ".staging" / prof
+    manifest = manifest if manifest is not None else {}
+    rollover_post = rollover_post or {}
+    suspects = suspects or {}
 
     def emit(msg):
         if log:
@@ -409,9 +534,32 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                 report["errors"].append(f"{src.name} -> {dest_dir}")
 
     for src, kind, _size in files:
+        if src.name in (suspects or {}):
+            emit(f"ALERTA — pode estar corrompido/interrompido: {src.name} ({suspects[src.name]}). "
+                 "Vai ser copiado mesmo assim; não formate o cartão antes de ver.")
+        # Destinos efetivos (pós-virada do contador vão para subpasta ZEROU).
+        if kind == "jpg":
+            _base_primary, _base_secondary = dests["jpg_sync"], (dests["jpg_copy"] if copy_jpg else None)
+        elif kind == "video":
+            _base_primary, _base_secondary = dests["video_sync"], (dests["video_copy"] if copy_video else None)
+        else:
+            _base_primary, _base_secondary = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
+        _sub = rollover_post.get(src.name)
+        # 0) retomada persistente: já conferido (manifest + HD) pula sem recopiar.
+        _eff_primary = _base_primary / _sub if _sub else _base_primary
+        _eff_secondary = _base_secondary / _sub if (_sub and _base_secondary is not None) else _base_secondary
+        _dest_paths = [_eff_primary / src.name]
+        if _eff_secondary is not None:
+            _dest_paths.append(_eff_secondary / src.name)
+        _key = manifest_key(prof, kind, src.name, _size)
+        _src_hash_check = file_hash(src) if verify_hash else None
+        if is_verified(manifest, _key, _dest_paths, _size, _src_hash_check):
+            report["skipped"] += 1
+            emit(f"Já conferido (retomada): {src.name}")
+            continue
         # 1) staging
         staged_dir = staging_root / kind
-        src_hash = file_hash(src) if verify_hash else None
+        src_hash = _src_hash_check
         try:
             action, staged = copy_one(src, staged_dir, src_hash=src_hash)
         except Exception as exc:  # noqa: BLE001
@@ -425,13 +573,12 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
         if action == "skipped":
             # Já estava no staging de uma tentativa anterior: usa ele.
             pass
-        # 2) move para o destino principal
-        if kind == "jpg":
-            primary_dir, secondary_dir = dests["jpg_sync"], (dests["jpg_copy"] if copy_jpg else None)
-        elif kind == "video":
-            primary_dir, secondary_dir = dests["video_sync"], (dests["video_copy"] if copy_video else None)
-        else:
-            primary_dir, secondary_dir = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
+        # 2) move para o destino principal (com subpasta ZEROU, se for o caso)
+        primary_dir, secondary_dir = _base_primary, _base_secondary
+        if _sub:
+            primary_dir = primary_dir / _sub
+            if secondary_dir is not None:
+                secondary_dir = secondary_dir / _sub
         # JPG, leva só em 01: se o JPG já está numa leva anterior,
         # não duplica em 01, mas garante a cópia plana em 02.
         if kind == "jpg" and primary_dir.name.startswith("Cartao_"):
@@ -446,6 +593,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                         break
             if prev_found:
                 tally("skipped", src, primary_dir)
+                _ok_secondary = True
                 if secondary_dir is not None:
                     try:
                         sec_hash = src_hash
@@ -454,6 +602,10 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                         action2 = "failed"
                         report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
                     tally(action2, src, secondary_dir)
+                    _ok_secondary = action2 in ("copied", "skipped")
+                if _ok_secondary:
+                    manifest[_key] = {"hash": src_hash, "dest": [str(primary_dir / src.name)] +
+                                      ([str(secondary_dir / src.name)] if secondary_dir is not None else [])}
                 try:
                     staged.unlink()
                 except OSError:
@@ -470,6 +622,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
         if action == "failed":
             continue
         # 3) cópia secundária (a partir do arquivo já verificado)
+        _ok_secondary = True
         if secondary_dir is not None:
             try:
                 sec_hash = file_hash(primary) if verify_hash else None
@@ -478,6 +631,10 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                 action2 = "failed"
                 report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
             tally(action2, src, secondary_dir)
+            _ok_secondary = action2 in ("copied", "skipped")
+        if action in ("copied", "skipped") and _ok_secondary:
+            manifest[_key] = {"hash": src_hash, "dest": [str(primary_dir / src.name)] +
+                              ([str(secondary_dir / src.name)] if secondary_dir is not None else [])}
     # Limpa o staging se ficou vazio (o normal); se sobrou arquivo
     # com falha, mantém para investigação e registra no log.
     try:
@@ -528,7 +685,8 @@ def run_copy(files, dests, copy_jpg=True, copy_video=True, log=None):
     return report
 
 
-def write_report(event_root, professional, source, files, report, leva=None):
+def write_report(event_root, professional, source, files, report, leva=None,
+                 suspects=None, rollover_warnings=None, verified_count=0):
     event_root.mkdir(parents=True, exist_ok=True)
     path = event_root / "relatorio-descarga.txt"
     counts = {}
@@ -547,6 +705,14 @@ def write_report(event_root, professional, source, files, report, leva=None):
         f"pulados (já existiam)={report['skipped']} "
         f"falhas={report['failed']}",
     ]
+    if verified_count:
+        lines.append(f"Já conferidos (retomada, sem recopiar): {verified_count}")
+    if suspects:
+        lines.append("ALERTA — podem estar corrompidos/interrompidos (copiados mesmo assim; não formate o cartão antes de ver):")
+        lines.extend(f"  - {name} ({reason})" for name, reason in suspects[:20])
+    if rollover_warnings:
+        lines.append("Contador zerado (C9999 -> C0001): arquivos pós-virada foram para a subpasta ZEROU:")
+        lines.extend(f"  - {prefix} a partir de {num:04d}" for prefix, num in rollover_warnings)
     if report["errors"]:
         lines.append("Falhas:")
         lines.extend(f"  - {e}" for e in report["errors"][:50])
@@ -653,6 +819,10 @@ class App:
         root.minsize(680, 560)
         self.scan = []
         self.others = 0
+        self.suspects = []
+        self.rollover_post = {}
+        self.rollover_warnings = []
+        self.verified_count = 0
         self.msg_queue = queue.Queue()
         self.copying = False
         self._build()
@@ -750,6 +920,13 @@ class App:
 
         self.preview_var = tk.StringVar(value="Clique em “Analisar cartão” para ver o que será copiado.")
         ttk.Label(frm, textvariable=self.preview_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
+
+        self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
+        ttk.Label(frm, textvariable=self.space_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
+        self.space_bar = ttk.Progressbar(frm, mode="determinate", maximum=100)
+        self.space_bar.pack(fill="x", pady=2)
+        self.space_copy_var = tk.StringVar(value="")
+        ttk.Label(frm, textvariable=self.space_copy_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
         self.progress = ttk.Progressbar(frm, mode="determinate")
         self.progress.pack(fill="x", pady=6)
@@ -883,6 +1060,8 @@ class App:
             messagebox.showerror("Origem", "Não use a pasta base D: como origem do cartão.")
             return
         self.scan, self.others = scan_source(source)
+        self.suspects = corruption_alerts(self.scan, source)
+        self.rollover_post, self.rollover_warnings = rollover_split(self.scan)
         counts = {}
         for _p, kind, _s in self.scan:
             counts[kind] = counts.get(kind, 0) + 1
@@ -904,12 +1083,57 @@ class App:
             ext_free = free_space_for(ext_base)
             ext_txt = f"\nCópias (02, 04, 06): {fmt_bytes(ext_need)}  •  Livre na pasta de cópias: {fmt_bytes(ext_free) if ext_free is not None else 'não foi possível verificar'}"
         leva_preview = next_leva_number(root, self.prof_var.get().strip())
+        # Retomada: quantos já estão conferidos (manifest + HD) e quantos bytes faltam.
+        _manifest = load_manifest(root)
+        _prof = sanitize(self.prof_var.get().strip())
+        _copy_root = (Path(ext_base) / root.name) if ext_base else None
+        self.verified_count = 0
+        _remaining = 0
+        for _path, _kind, _size in self.scan:
+            _dests = destinations_for(root, _prof, _copy_root, leva=leva_preview)
+            if _kind == "jpg":
+                _key_paths = [_dests["jpg_sync"] / Path(_path).name] + ([_dests["jpg_copy"] / Path(_path).name] if self.copy_jpg_var.get() else [])
+            elif _kind == "video":
+                _key_paths = [_dests["video_sync"] / Path(_path).name] + ([_dests["video_copy"] / Path(_path).name] if self.copy_video_var.get() else [])
+            else:
+                _key_paths = [_dests["raw_backup"] / Path(_path).name] + ([_dests["raw_copy"] / Path(_path).name] if self.copy_raw_var.get() else [])
+            if is_verified(_manifest, manifest_key(_prof, _kind, Path(_path).name, _size), _key_paths, _size, None):
+                self.verified_count += 1
+            else:
+                _remaining += _size
+        _verified_txt = f"\nJá conferidos (retomada, sem recopiar): {self.verified_count}  •  Falta copiar: {fmt_bytes(_remaining)}" if self.verified_count else ""
+        _suspect_txt = ""
+        if self.suspects:
+            _names = ", ".join(n for n, _r in self.suspects[:3])
+            _suspect_txt = f"\nALERTA — {len(self.suspects)} arquivo(s) podem estar corrompidos/interrompidos ({_names}{'...' if len(self.suspects) > 3 else ''}). Serão copiados mesmo assim; não formate o cartão antes de ver."
+        _rollover_txt = ""
+        if self.rollover_warnings:
+            _rollover_txt = "\nContador zerado: " + "; ".join(f"{pre} a partir de {num:04d} (pós-virada vai para subpasta ZEROU)" for pre, num in self.rollover_warnings)
         self.preview_var.set(
             f"Encontrados: JPG={counts.get('jpg', 0)}  RAW={counts.get('raw', 0)}  "
             f"Vídeo={counts.get('video', 0)}  Outros ignorados={self.others}\n"
-            f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}\n"
+            f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}{_verified_txt}{_suspect_txt}{_rollover_txt}\n"
             f"Destino primário: {root}"
         )
+        # Barra de espaço ao vivo (D: e, se houver, pasta de cópias).
+        try:
+            _usage = shutil.disk_usage(str(Path(self.base_var.get().strip()).anchor or self.base_var.get().strip()))
+            _used_pct = 100.0 * (_usage.total - _usage.free) / _usage.total if _usage.total else 0
+            self.space_bar["value"] = _used_pct
+            self.space_var.set(f"Espaço em D:: livre {fmt_bytes(free) if free is not None else '—'} de {fmt_bytes(_usage.total)} "
+                               f"({100.0 - _used_pct:.0f}% livre)  •  Necessário no primário: {fmt_bytes(primary)}")
+        except Exception:
+            self.space_bar["value"] = 0
+            self.space_var.set("Espaço em D:: não foi possível medir.")
+        if ext_base:
+            _ext_free = free_space_for(ext_base)
+            try:
+                _ext_usage = shutil.disk_usage(str(Path(ext_base).anchor or ext_base))
+                self.space_copy_var.set(f"Espaço nas cópias: livre {fmt_bytes(_ext_free) if _ext_free is not None else '—'} de {fmt_bytes(_ext_usage.total)}  •  Necessário: {fmt_bytes(copy_total)}")
+            except Exception:
+                self.space_copy_var.set(f"Espaço nas cópias: livre {fmt_bytes(_ext_free) if _ext_free is not None else '—'}  •  Necessário: {fmt_bytes(copy_total)}")
+        else:
+            self.space_copy_var.set("")
         self._log(f"Análise: {counts} | outros={self.others} | primário={fmt_bytes(primary)} | cópias={fmt_bytes(copy_total)} | livre D:={free_txt} | par JPG/RAW sem par: {jpg_no_raw}/{raw_no_jpg}")
 
     def add_to_queue(self):
@@ -945,11 +1169,14 @@ class App:
         done = 0
         ext_base = self.external_var.get().strip()
         copy_event_root = (Path(ext_base) / root.name) if ext_base else None
+        manifest = load_manifest(root)
         allocated = {}
         for source, prof, files, _others in jobs:
             leva = next_leva_number(root, prof) + allocated.get(prof, 0)
             allocated[prof] = allocated.get(prof, 0) + 1
             dests = destinations_for(root, prof, copy_event_root, leva=leva)
+            _suspects_map = {n: r for n, r in corruption_alerts(files, source)}
+            _rollover_post, _rollover_warnings = rollover_split(files)
             report = process_card(
                 files, dests, root, prof,
                 copy_jpg=self.copy_jpg_var.get(),
@@ -957,11 +1184,17 @@ class App:
                 copy_raw=self.copy_raw_var.get(),
                 verify_hash=self.hash_var.get(),
                 log=lambda m: self.msg_queue.put(("log", m)),
+                manifest=manifest,
+                rollover_post=_rollover_post,
+                suspects=_suspects_map,
             )
+            save_manifest(root, manifest)
             for k in ("copied", "skipped", "failed"):
                 total_report[k] += report[k]
             total_report["errors"].extend(report["errors"])
-            write_report(root, prof, source, files, report, leva=leva)
+            write_report(root, prof, source, files, report, leva=leva,
+                         suspects=[(n, r) for n, r in corruption_alerts(files, source)],
+                         rollover_warnings=_rollover_warnings)
             append_history(root, prof, leva, source, files, report)
             self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
             done += len(files)
@@ -1070,6 +1303,9 @@ class App:
                     self._log(f"Concluído: copiados={report['copied']} pulados={report['skipped']} "
                               f"falhas={report['failed']} | relatório: {report_path}")
                     self._play_sound(report["failed"] == 0)
+                    if self.suspects:
+                        self._log("ALERTA: " + "; ".join(f"{n} ({r})" for n, r in self.suspects[:10]) +
+                                  " — podem estar corrompidos/interrompidos. Não formate o cartão antes de ver.")
                     if report["failed"] == 0:
                         self.last_success = True
                         self.btn_eject.config(state="normal")
