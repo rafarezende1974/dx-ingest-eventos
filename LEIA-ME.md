@@ -1,3 +1,15 @@
+# Editor Assistente v1.8.1 — correção do visual (só layout, sem mudar função)
+
+- Os cartões de destino e o progresso grande existiam desde a v1.7.0,
+  mas estavam no fim da janela, abaixo da área visível — por isso o
+  app parecia igual ao de antes. Agora eles ficam logo depois dos
+  botões Analisar/Descarregar, na ordem do mockup aprovado, e a
+  janela ganhou rolagem, então nada mais fica cortado.
+- A largura do conteúdo agora acompanha a janela (antes o lado direito
+  ficava cortado); a fileira de checkboxes foi dividida em duas linhas
+  e os rótulos das pastas passam a incluir o áudio: primário
+  01, 03, 05, 07 e cópias 02, 04, 06, 08.
+
 # Editor Assistente v1.8.0 — áudio (07/08) + modo multicâmera
 
 - **Áudio:** novo tipo, com as pastas **07_Audio** (primário) e

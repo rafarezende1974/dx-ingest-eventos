@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -852,7 +852,7 @@ class App:
                 root._icon_photo = photo
         except Exception:
             pass
-        root.geometry("780x780")
+        root.geometry("780x860")
         root.minsize(680, 560)
         self.scan = []
         self.others = 0
@@ -867,8 +867,18 @@ class App:
     # ---------- interface ----------
     def _build(self):
         pad = {"padx": 8, "pady": 4}
-        frm = ttk.Frame(self.root)
-        frm.pack(fill="both", expand=True, padx=10, pady=10)
+        # Janela rolável: o conteúdo é mais alto que a janela e, sem rolagem,
+        # os cartões de destino e o progresso grande ficavam cortados (v1.8.1).
+        self._canvas = tk.Canvas(self.root, highlightthickness=0)
+        self._scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._scrollbar.set)
+        self._scrollbar.pack(side="right", fill="y")
+        self._canvas.pack(side="left", fill="both", expand=True)
+        frm = ttk.Frame(self._canvas, padding=10)
+        self._frame_id = self._canvas.create_window((0, 0), window=frm, anchor="nw")
+        frm.bind("<Configure>", lambda _e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind("<Configure>", lambda e: self._canvas.itemconfig(self._frame_id, width=e.width))
+        self._canvas.bind_all("<MouseWheel>", lambda e: self._canvas.yview_scroll(-1 * int(e.delta / 120), "units"))
         cfg = self.config
         profs = cfg.get("professionals") or ["Fotografo_01", "Cinegrafista_01"]
         self.theme_var = tk.StringVar(value=cfg.get("theme", "claro"))
@@ -931,7 +941,7 @@ class App:
         ttk.Entry(row, textvariable=self.base_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Button(row, text="Procurar...", command=self._pick_base).pack(side="left", **pad)
 
-        ttk.Label(frm, text="5) Pasta das cópias (02, 04, 06) — outra unidade/pasta (ex.: E:\\Copias). Se vazia, as cópias ficam em D:").pack(anchor="w")
+        ttk.Label(frm, text="5) Pasta das cópias (02, 04, 06, 08) — outra unidade/pasta (ex.: E:\\Copias). Se vazia, as cópias ficam em D:", wraplength=740, justify="left").pack(anchor="w")
         row = ttk.Frame(frm)
         row.pack(fill="x")
         self.external_var = tk.StringVar(value=cfg.get("external_base", ""))
@@ -946,8 +956,10 @@ class App:
         self.copy_raw_var = tk.BooleanVar(value=cfg.get("copy_raw", True))
         self.copy_audio_var = tk.BooleanVar(value=cfg.get("copy_audio", True))
         self.hash_var = tk.BooleanVar(value=cfg.get("verify_hash", False))
-        ttk.Checkbutton(opts, text="Fazer cópias em outra unidade (02, 04, 06) — desmarque para descarregar mais rápido e fazer o backup depois",
+        ttk.Checkbutton(opts, text="Fazer cópias em outra unidade (02, 04, 06, 08)",
                         variable=self.copy_enabled_var).pack(anchor="w", **pad)
+        ttk.Label(opts, text="Desmarque para descarregar mais rápido e fazer o backup depois.",
+                  style="Muted.Card.TLabel").pack(anchor="w", padx=8)
         opts2 = ttk.Frame(frm)
         opts2.pack(fill="x", pady=0)
         self.chk_copy_jpg = ttk.Checkbutton(opts2, text="Cópia do JPG (02)", variable=self.copy_jpg_var)
@@ -958,7 +970,9 @@ class App:
         self.chk_copy_raw.pack(side="left", **pad)
         self.chk_copy_audio = ttk.Checkbutton(opts2, text="Cópia do áudio (08)", variable=self.copy_audio_var)
         self.chk_copy_audio.pack(side="left", **pad)
-        ttk.Checkbutton(opts2, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
+        opts3 = ttk.Frame(frm)
+        opts3.pack(fill="x", pady=0)
+        ttk.Checkbutton(opts3, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
         self.copy_enabled_var.trace_add("write", lambda *_a: self._toggle_copy_options())
         self._toggle_copy_options()
 
@@ -972,6 +986,32 @@ class App:
         self.btn_open.pack(side="left", **pad)
         self.btn_eject = ttk.Button(btns, text="Ejetar com segurança", command=self.eject_card, state="disabled")
         self.btn_eject.pack(side="left", **pad)
+
+        # Cartões de destino (visual v1.7): um cartão por destino, com barra de espaço.
+        cards = ttk.Frame(frm)
+        cards.pack(fill="x", pady=4)
+        card_p = ttk.LabelFrame(cards, text="Primário (D:) — 01, 03, 05, 07", style="Card.TLabelframe")
+        card_p.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
+        ttk.Label(card_p, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
+        self.space_bar = ttk.Progressbar(card_p, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_bar.pack(fill="x", padx=8, pady=(0, 8))
+        card_c = ttk.LabelFrame(cards, text="Cópias (outra unidade) — 02, 04, 06, 08", style="Card.TLabelframe")
+        card_c.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        self.space_copy_var = tk.StringVar(value="")
+        ttk.Label(card_c, textvariable=self.space_copy_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
+        self.space_copy_bar = ttk.Progressbar(card_c, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_copy_bar.pack(fill="x", padx=8, pady=(0, 8))
+
+        # Progresso grande (visual v1.7): barra alta + percentual + status.
+        prow = ttk.Frame(frm)
+        prow.pack(fill="x", pady=6)
+        self.progress_var = tk.StringVar(value="0%")
+        ttk.Label(prow, textvariable=self.progress_var, font=("Segoe UI", 16, "bold")).pack(side="left", padx=(0, 10))
+        self.progress = ttk.Progressbar(prow, mode="determinate", style="Green.Horizontal.TProgressbar")
+        self.progress.pack(side="left", fill="x", expand=True)
+        self.status_var = tk.StringVar(value="Pronto.")
+        ttk.Label(frm, textvariable=self.status_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
         ttk.Label(frm, text="Fila de cartões (um atrás do outro, mesmo evento)").pack(anchor="w")
         qrow = ttk.Frame(frm)
@@ -997,32 +1037,6 @@ class App:
 
         self.preview_var = tk.StringVar(value="Clique em “Analisar cartão” para ver o que será copiado.")
         ttk.Label(frm, textvariable=self.preview_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
-
-        # Cartões de destino (visual v1.7): um cartão por destino, com barra de espaço.
-        cards = ttk.Frame(frm)
-        cards.pack(fill="x", pady=4)
-        card_p = ttk.LabelFrame(cards, text="Primário (D:) — 01, 03, 05", style="Card.TLabelframe")
-        card_p.pack(side="left", fill="both", expand=True, padx=(0, 4))
-        self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
-        ttk.Label(card_p, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
-        self.space_bar = ttk.Progressbar(card_p, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
-        self.space_bar.pack(fill="x", padx=8, pady=(0, 8))
-        card_c = ttk.LabelFrame(cards, text="Cópias (outra unidade) — 02, 04, 06", style="Card.TLabelframe")
-        card_c.pack(side="left", fill="both", expand=True, padx=(4, 0))
-        self.space_copy_var = tk.StringVar(value="")
-        ttk.Label(card_c, textvariable=self.space_copy_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
-        self.space_copy_bar = ttk.Progressbar(card_c, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
-        self.space_copy_bar.pack(fill="x", padx=8, pady=(0, 8))
-
-        # Progresso grande (visual v1.7): barra alta + percentual + status.
-        prow = ttk.Frame(frm)
-        prow.pack(fill="x", pady=6)
-        self.progress_var = tk.StringVar(value="0%")
-        ttk.Label(prow, textvariable=self.progress_var, font=("Segoe UI", 16, "bold")).pack(side="left", padx=(0, 10))
-        self.progress = ttk.Progressbar(prow, mode="determinate", style="Green.Horizontal.TProgressbar")
-        self.progress.pack(side="left", fill="x", expand=True)
-        self.status_var = tk.StringVar(value="Pronto.")
-        ttk.Label(frm, textvariable=self.status_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
         ttk.Label(frm, text="Registro").pack(anchor="w")
         self.log = tk.Text(frm, height=6, wrap="word")
