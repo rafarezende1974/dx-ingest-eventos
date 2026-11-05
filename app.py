@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -59,10 +59,10 @@ ACCENT = "#22C55E"
 THEMES = {
     "claro": {"bg": "#F4F5F7", "card": "#FFFFFF", "fg": "#111827",
               "muted": "#6B7280", "entry": "#FFFFFF", "list": "#FFFFFF",
-              "list_fg": "#111827", "bar_bg": "#E5E7EB"},
+              "list_fg": "#111827", "bar_bg": "#E5E7EB", "border": "#E5E7EB"},
     "escuro": {"bg": "#111827", "card": "#1F2937", "fg": "#F9FAFB",
                "muted": "#9CA3AF", "entry": "#374151", "list": "#1F2937",
-               "list_fg": "#F9FAFB", "bar_bg": "#374151"},
+               "list_fg": "#F9FAFB", "bar_bg": "#374151", "border": "#374151"},
 }
 
 
@@ -280,10 +280,29 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def copy_one(src, dest_dir, src_hash=None):
+def copy_chunked(src, dest, progress_cb=None):
+    """Copia em blocos de 1 MB, chamando progress_cb(n_bytes) a cada bloco.
+
+    Equivalente a shutil.copy2 (conteúdo + metadados)."""
+    total = 0
+    with open(src, "rb") as fh_in, open(dest, "wb") as fh_out:
+        for chunk in iter(lambda: fh_in.read(1024 * 1024), b""):
+            fh_out.write(chunk)
+            total += len(chunk)
+            if progress_cb:
+                progress_cb(len(chunk))
+    try:
+        shutil.copystat(str(src), str(dest))
+    except OSError:
+        pass
+    return total
+
+
+def copy_one(src, dest_dir, src_hash=None, progress_cb=None):
     """Copia um arquivo com verificação por tamanho (e por hash, se dado).
 
     Retorna (ação, destino): copied, skipped ou failed. Nunca sobrescreve.
+    progress_cb, quando dado, recebe os bytes escritos (para a barra).
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     src_size = src.stat().st_size
@@ -292,12 +311,14 @@ def copy_one(src, dest_dir, src_hash=None):
         try:
             if dest.stat().st_size == src_size:
                 if src_hash is None or file_hash(dest) == src_hash:
+                    if progress_cb:
+                        progress_cb(src_size)
                     return "skipped", dest
                 # Mesmo nome e tamanho, conteúdo diferente (corrompido):
                 # apaga e recopia no mesmo nome, em vez de pular.
                 try:
                     dest.unlink()
-                    shutil.copy2(str(src), str(dest))
+                    copy_chunked(src, dest, progress_cb)
                     if dest.stat().st_size == src_size and (src_hash is None or file_hash(dest) == src_hash):
                         return "copied", dest
                 except Exception:
@@ -316,11 +337,13 @@ def copy_one(src, dest_dir, src_hash=None):
                 break
             try:
                 if dest.stat().st_size == src_size and (src_hash is None or file_hash(dest) == src_hash):
+                    if progress_cb:
+                        progress_cb(src_size)
                     return "skipped", dest
             except OSError:
                 pass
             i += 1
-    shutil.copy2(str(src), str(dest))
+    copy_chunked(src, dest, progress_cb)
     try:
         if dest.stat().st_size != src_size:
             raise OSError("tamanho divergente após cópia")
@@ -535,7 +558,7 @@ def save_config(data):
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
                  copy_video=True, copy_raw=True, copy_audio=True, verify_hash=False, log=None,
-                 manifest=None, rollover_post=None, suspects=None):
+                 manifest=None, rollover_post=None, suspects=None, progress_cb=None):
     """Descarga com staging (v1.5: leva Cartao_N só em 01).
 
     1) Copia cada arquivo do cartão para .staging (fora das pastas de sync).
@@ -555,6 +578,10 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
     def emit(msg):
         if log:
             log(msg)
+
+    def _done_bytes(n):
+        if progress_cb:
+            progress_cb(n)
 
     def tally(action, src, dest_dir):
         if action == "copied":
@@ -590,13 +617,14 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
         _src_hash_check = file_hash(src) if verify_hash else None
         if is_verified(manifest, _key, _dest_paths, _size, _src_hash_check):
             report["skipped"] += 1
+            _done_bytes(_size * len(_dest_paths))
             emit(f"Já conferido (retomada): {src.name}")
             continue
         # 1) staging
         staged_dir = staging_root / kind
         src_hash = _src_hash_check
         try:
-            action, staged = copy_one(src, staged_dir, src_hash=src_hash)
+            action, staged = copy_one(src, staged_dir, src_hash=src_hash, progress_cb=progress_cb)
         except Exception as exc:  # noqa: BLE001
             report["failed"] += 1
             report["errors"].append(f"{src.name} -> staging: {exc}")
@@ -628,11 +656,12 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                         break
             if prev_found:
                 tally("skipped", src, primary_dir)
+                _done_bytes(_size)
                 _ok_secondary = True
                 if secondary_dir is not None:
                     try:
                         sec_hash = src_hash
-                        action2, _d = copy_one(staged, secondary_dir, src_hash=sec_hash)
+                        action2, _d = copy_one(staged, secondary_dir, src_hash=sec_hash, progress_cb=progress_cb)
                     except Exception as exc:  # noqa: BLE001
                         action2 = "failed"
                         report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
@@ -661,7 +690,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
         if secondary_dir is not None:
             try:
                 sec_hash = file_hash(primary) if verify_hash else None
-                action2, _d = copy_one(primary, secondary_dir, src_hash=sec_hash)
+                action2, _d = copy_one(primary, secondary_dir, src_hash=sec_hash, progress_cb=progress_cb)
             except Exception as exc:  # noqa: BLE001
                 action2 = "failed"
                 report["errors"].append(f"{src.name} -> {secondary_dir}: {exc}")
@@ -959,7 +988,7 @@ class App:
         ttk.Checkbutton(opts, text="Fazer cópias em outra unidade (02, 04, 06, 08)",
                         variable=self.copy_enabled_var).pack(anchor="w", **pad)
         ttk.Label(opts, text="Desmarque para descarregar mais rápido e fazer o backup depois.",
-                  style="Muted.Card.TLabel").pack(anchor="w", padx=8)
+                  style="Muted.TLabel").pack(anchor="w", padx=8)
         opts2 = ttk.Frame(frm)
         opts2.pack(fill="x", pady=0)
         self.chk_copy_jpg = ttk.Checkbutton(opts2, text="Cópia do JPG (02)", variable=self.copy_jpg_var)
@@ -980,28 +1009,33 @@ class App:
         btns.pack(fill="x", pady=6)
         self.btn_scan = ttk.Button(btns, text="Analisar cartão", command=self.analyze)
         self.btn_scan.pack(side="left", **pad)
-        self.btn_copy = ttk.Button(btns, text="Descarregar", command=self.start_copy)
+        self.btn_copy = ttk.Button(btns, text="Descarregar", command=self.start_copy, style="Accent.TButton")
         self.btn_copy.pack(side="left", **pad)
         self.btn_open = ttk.Button(btns, text="Abrir pasta do evento", command=self.open_event)
         self.btn_open.pack(side="left", **pad)
         self.btn_eject = ttk.Button(btns, text="Ejetar com segurança", command=self.eject_card, state="disabled")
         self.btn_eject.pack(side="left", **pad)
 
-        # Cartões de destino (visual v1.7): um cartão por destino, com barra de espaço.
+        # Cartões de destino (visual do mockup): cartão branco com título dentro,
+        # texto de espaço e barra verde — sem o LabelFrame antigo.
         cards = ttk.Frame(frm)
         cards.pack(fill="x", pady=4)
-        card_p = ttk.LabelFrame(cards, text="Primário (D:) — 01, 03, 05, 07", style="Card.TLabelframe")
-        card_p.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        self.card_p_frame = tk.Frame(cards, relief="flat", bd=0, highlightthickness=1,
+                                     highlightbackground="#E5E7EB")
+        self.card_p_frame.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        ttk.Label(self.card_p_frame, text="Primário (D:) — 01, 03, 05, 07", style="CardTitle.TLabel").pack(anchor="w", padx=10, pady=(8, 0))
         self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
-        ttk.Label(card_p, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
-        self.space_bar = ttk.Progressbar(card_p, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
-        self.space_bar.pack(fill="x", padx=8, pady=(0, 8))
-        card_c = ttk.LabelFrame(cards, text="Cópias (outra unidade) — 02, 04, 06, 08", style="Card.TLabelframe")
-        card_c.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        ttk.Label(self.card_p_frame, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=10, pady=4)
+        self.space_bar = ttk.Progressbar(self.card_p_frame, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_bar.pack(fill="x", padx=10, pady=(0, 10))
+        self.card_c_frame = tk.Frame(cards, relief="flat", bd=0, highlightthickness=1,
+                                     highlightbackground="#E5E7EB")
+        self.card_c_frame.pack(side="left", fill="both", expand=True, padx=(4, 0))
+        ttk.Label(self.card_c_frame, text="Cópias (outra unidade) — 02, 04, 06, 08", style="CardTitle.TLabel").pack(anchor="w", padx=10, pady=(8, 0))
         self.space_copy_var = tk.StringVar(value="")
-        ttk.Label(card_c, textvariable=self.space_copy_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
-        self.space_copy_bar = ttk.Progressbar(card_c, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
-        self.space_copy_bar.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Label(self.card_c_frame, textvariable=self.space_copy_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=10, pady=4)
+        self.space_copy_bar = ttk.Progressbar(self.card_c_frame, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_copy_bar.pack(fill="x", padx=10, pady=(0, 10))
 
         # Progresso grande (visual v1.7): barra alta + percentual + status.
         prow = ttk.Frame(frm)
@@ -1163,7 +1197,9 @@ class App:
         style.configure("Card.TLabelframe", background=th["card"], foreground=th["fg"])
         style.configure("Card.TLabelframe.Label", background=th["card"], foreground=th["fg"])
         style.configure("Title.Card.TLabel", background=th["card"], foreground=th["fg"], font=("Segoe UI", 14, "bold"))
+        style.configure("CardTitle.TLabel", background=th["card"], foreground=th["fg"], font=("Segoe UI", 10, "bold"))
         style.configure("Muted.Card.TLabel", background=th["card"], foreground=th["muted"])
+        style.configure("Muted.TLabel", background=th["bg"], foreground=th["muted"])
         style.configure("TButton", background=th["card"], foreground=th["fg"])
         style.configure("Accent.TButton", background=ACCENT, foreground="white")
         style.configure("TCheckbutton", background=th["bg"], foreground=th["fg"])
@@ -1177,7 +1213,10 @@ class App:
         if hasattr(self, "log"):
             self.log.configure(bg=th["list"], fg=th["list_fg"], insertbackground=th["fg"])
         if hasattr(self, "header_frame"):
-            self.header_frame.configure(bg=th["card"])
+            self.header_frame.configure(bg=th["card"], highlightbackground=th["border"])
+        for _f in (getattr(self, "card_p_frame", None), getattr(self, "card_c_frame", None)):
+            if _f is not None:
+                _f.configure(bg=th["card"], highlightbackground=th["border"])
         self._refresh_header()
 
     def _toggle_theme(self):
@@ -1375,10 +1414,24 @@ class App:
 
     def _run_jobs(self, jobs, root):
         """jobs: [(origem, profissional, arquivos, outros)]. Roda em thread."""
-        total_files = sum(len(files) for _s, _p, files, _o in jobs)
-        self.msg_queue.put(("total", max(1, total_files)))
+        _cj, _cv, _cr, _ca = self._copy_flags()
+        total_bytes = 0
+        for _s, _p, files, _o in jobs:
+            _pr, _cp = split_needed(files, _cj, _cv, _cr, _ca)
+            total_bytes += _pr + _cp
+        total_bytes = max(1, total_bytes)
+        self.msg_queue.put(("total_bytes", total_bytes))
         total_report = {"copied": 0, "skipped": 0, "failed": 0, "errors": []}
-        done = 0
+        done = [0]
+        last_pct = [-1]
+
+        def _on_bytes(n):
+            done[0] += n
+            pct = 100 * done[0] // total_bytes
+            if pct != last_pct[0]:
+                last_pct[0] = pct
+                self.msg_queue.put(("progress_bytes", done[0]))
+
         ext_base = self.external_var.get().strip()
         copy_event_root = (Path(ext_base) / root.name) if ext_base else None
         manifest = load_manifest(root)
@@ -1389,7 +1442,6 @@ class App:
             dests = destinations_for(root, prof, copy_event_root, leva=leva)
             _suspects_map = {n: r for n, r in corruption_alerts(files, source)}
             _rollover_post, _rollover_warnings = rollover_split(files)
-            _cj, _cv, _cr, _ca = self._copy_flags()
             report = process_card(
                 files, dests, root, prof,
                 copy_jpg=_cj,
@@ -1401,6 +1453,7 @@ class App:
                 manifest=manifest,
                 rollover_post=_rollover_post,
                 suspects=_suspects_map,
+                progress_cb=_on_bytes,
             )
             save_manifest(root, manifest)
             for k in ("copied", "skipped", "failed"):
@@ -1412,8 +1465,6 @@ class App:
                          mode_label=self._mode_label())
             append_history(root, prof, leva, source, files, report)
             self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
-            done += len(files)
-            self.msg_queue.put(("progress", done))
             self.msg_queue.put(("log", f"Cartão {prof}: copiados={report['copied']} pulados={report['skipped']} falhas={report['failed']}"))
         self.msg_queue.put(("done", (total_report, root / "relatorio-descarga.txt")))
 
@@ -1453,7 +1504,7 @@ class App:
         self.btn_eject.config(state="disabled")
         self.btn_copy.config(state="disabled")
         self.btn_scan.config(state="disabled")
-        self.progress["maximum"] = max(1, sum(len(files) for _s, _p, files, _o in jobs))
+        self.progress["maximum"] = max(1, primaries + copies)
         self.progress["value"] = 0
         self.progress_var.set("0%")
         self.status_var.set("Copiando…")
@@ -1506,7 +1557,13 @@ class App:
         try:
             while True:
                 kind, payload = self.msg_queue.get_nowait()
-                if kind == "progress":
+                if kind == "progress_bytes":
+                    self.progress["value"] = payload
+                    _max = self.progress["maximum"] or 1
+                    self.progress_var.set(f"{100 * payload // _max}%")
+                elif kind == "total_bytes":
+                    self.progress["maximum"] = payload
+                elif kind == "progress":
                     self.progress["value"] = payload
                     _max = self.progress["maximum"] or 1
                     self.progress_var.set(f"{100 * payload // _max}%")

@@ -1,3 +1,16 @@
+# Editor Assistente v1.8.2 — progresso gradativo por bytes + visual do mockup
+
+- **Progresso de verdade:** antes a barra só era atualizada uma vez por
+  cartão, no fim da cópia — por isso ficava em 0% o tempo todo e pulava
+  para 100% no fim. Agora a cópia é feita em blocos de 1 MB e a barra
+  avança por bytes escritos (primário + cópias), então ela sobe
+  gradativamente durante a cópia, inclusive em vídeo grande. Arquivos
+  já conferidos (retomada) ou já existentes no destino também contam
+  na barra, para ela sempre chegar a 100%.
+- **Visual mais perto do mockup:** os cartões de destino agora são
+  cartões brancos com o título dentro (antes era o LabelFrame antigo),
+  e o botão "Descarregar" ficou verde, como o botão de ação do mockup.
+
 # Editor Assistente v1.8.1 — correção do visual (só layout, sem mudar função)
 
 - Os cartões de destino e o progresso grande existiam desde a v1.7.0,
