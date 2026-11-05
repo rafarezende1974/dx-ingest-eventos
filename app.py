@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "2.0.0-dev.2"
+VERSION = "2.0.0"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.

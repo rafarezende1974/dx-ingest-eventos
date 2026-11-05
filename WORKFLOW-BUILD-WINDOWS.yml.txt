@@ -3,6 +3,7 @@ name: Validate and build Windows v2
 on:
   push:
     branches: [main, 'codex/editor-assistente-v2']
+    tags: ['v2.0.0']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -35,6 +36,39 @@ jobs:
           if ($app.ExitCode -ne 0) { throw "Application smoke test failed: $($app.ExitCode)" }
       - uses: actions/upload-artifact@v4
         with:
-          name: editor-assistente-v2-preview
+          name: editor-assistente-2.0.0-windows
           path: dist/EditorAssistente/
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v2.0.0'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify release belongs to main
+        shell: pwsh
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: editor-assistente-2.0.0-windows
+          path: package/EditorAssistente
+      - name: Package and publish official version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          Copy-Item README.md package/EditorAssistente/README.md
+          Copy-Item RELEASE-NOTES.md package/EditorAssistente/RELEASE-NOTES.md
+          Compress-Archive -Path package/EditorAssistente -DestinationPath EditorAssistente-2.0.0-Windows.zip
+          $hash = (Get-FileHash EditorAssistente-2.0.0-Windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  EditorAssistente-2.0.0-Windows.zip" | Set-Content SHA256SUMS.txt -Encoding ascii
+          gh release create v2.0.0 EditorAssistente-2.0.0-Windows.zip SHA256SUMS.txt --verify-tag --title 'Editor Assistente 2.0.0' --notes-file RELEASE-NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

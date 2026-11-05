@@ -239,7 +239,7 @@ class NeonApp(core.App):
         title.pack(side="left", fill="x", expand=True)
         label(title, "Gestão de Cartões para Eventos", 22, bold=True).pack(anchor="w")
         label(title, "Descarga, organização e backup de foto, vídeo, RAW e áudio", 13, MUTED).pack(anchor="w")
-        label(top, "2.0 · PRÉVIA", 12, "#d497ff", True).pack(side="right", padx=24)
+        label(top, f"v{core.VERSION}", 12, "#d497ff", True).pack(side="right", padx=24)
 
     def _build_event(self, host):
         bar = frame(host)
