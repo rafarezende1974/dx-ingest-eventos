@@ -1,3 +1,19 @@
+# Editor Assistente v1.8.0 — áudio (07/08) + modo multicâmera
+
+- **Áudio:** novo tipo, com as pastas **07_Audio** (primário) e
+  **08_Audio_Copia** (cópia), planas por profissional/câmera. Formatos:
+  WAV, MP3, M4A, FLAC, AAC, AIF/AIFF, OGG e Opus. A cópia 08 entra na
+  chave mestra de cópias e tem o seu checkbox "Cópia do áudio (08)".
+  A análise mostra a contagem de áudios; o relatório e o checklist
+  também (o CSV ganhou a coluna "audio").
+- **Modo multicâmera:** seletor "Modo: Equipe / Multicâmera" (salvo
+  na configuração). No modo multicâmera o campo "Profissional" vira
+  "Câmera" e a subpasta passa a ser o nome da câmera (ex.:
+  Camera_Palco, Camera_Baterista), com lista de sugestões separada
+  da de profissionais. Relatório e checklist mostram "Câmera:" nesse
+  modo. Todo o resto funciona igual.
+- Nada do 01 ao 06 mudou de número ou de lugar.
+
 # Editor Assistente v1.7.0 — novo visual (inspirado no Descarrega, só visual)
 
 - **Cabeçalho do evento:** cartão no topo com o nome do evento, a

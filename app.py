@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -77,6 +77,8 @@ RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
             ".orf", ".pef", ".x3f", ".3fr", ".mos", ".erf"}
 VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi",
               ".wmv", ".mkv", ".mpg", ".mpeg", ".insv"}
+AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".aac", ".aif", ".aiff",
+              ".ogg", ".opus"}
 
 FOLDERS = {
     # Numeração global: ímpar = primário (D:), par = cópia (outra unidade/pasta).
@@ -86,6 +88,8 @@ FOLDERS = {
     "video_copy": "04_Videos_Copia",
     "raw_backup": "05_RAW",
     "raw_copy": "06_RAW_Copia",
+    "audio_primary": "07_Audio",
+    "audio_copy": "08_Audio_Copia",
 }
 
 
@@ -97,6 +101,8 @@ def classify(path):
         return "raw"
     if ext in VIDEO_EXTS:
         return "video"
+    if ext in AUDIO_EXTS:
+        return "audio"
     return None
 
 
@@ -149,6 +155,8 @@ def destinations_for(event_root, professional, copy_event_root=None, leva=None):
         "video_copy": copy_root / FOLDERS["video_copy"] / prof,
         "raw_backup": event_root / FOLDERS["raw_backup"] / prof,
         "raw_copy": copy_root / FOLDERS["raw_copy"] / prof,
+        "audio_primary": event_root / FOLDERS["audio_primary"] / prof,
+        "audio_copy": copy_root / FOLDERS["audio_copy"] / prof,
     }
 
 
@@ -205,7 +213,7 @@ def list_removable_drives():
         return []
 
 
-def split_needed(files, copy_jpg=True, copy_video=True, copy_raw=True):
+def split_needed(files, copy_jpg=True, copy_video=True, copy_raw=True, copy_audio=True):
     """Retorna (bytes primário, bytes cópia)."""
     primary = sum(s for _p, _k, s in files)
     copy_total = 0
@@ -216,16 +224,20 @@ def split_needed(files, copy_jpg=True, copy_video=True, copy_raw=True):
             copy_total += s
         elif kind == "raw" and copy_raw:
             copy_total += s
+        elif kind == "audio" and copy_audio:
+            copy_total += s
     return primary, copy_total
 
 
-def needed_bytes(files, copy_jpg=True, copy_video=True):
+def needed_bytes(files, copy_jpg=True, copy_video=True, copy_audio=True):
     total = 0
     for _p, kind, size in files:
         if kind == "jpg":
             total += size * (2 if copy_jpg else 1)
         elif kind == "video":
             total += size * (2 if copy_video else 1)
+        elif kind == "audio":
+            total += size * (2 if copy_audio else 1)
         else:  # raw: só 1 destino
             total += size
     return total
@@ -522,7 +534,7 @@ def save_config(data):
 
 
 def process_card(files, dests, event_root, professional, copy_jpg=True,
-                 copy_video=True, copy_raw=True, verify_hash=False, log=None,
+                 copy_video=True, copy_raw=True, copy_audio=True, verify_hash=False, log=None,
                  manifest=None, rollover_post=None, suspects=None):
     """Descarga com staging (v1.5: leva Cartao_N só em 01).
 
@@ -563,6 +575,8 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
             _base_primary, _base_secondary = dests["jpg_sync"], (dests["jpg_copy"] if copy_jpg else None)
         elif kind == "video":
             _base_primary, _base_secondary = dests["video_sync"], (dests["video_copy"] if copy_video else None)
+        elif kind == "audio":
+            _base_primary, _base_secondary = dests["audio_primary"], (dests["audio_copy"] if copy_audio else None)
         else:
             _base_primary, _base_secondary = dests["raw_backup"], (dests["raw_copy"] if copy_raw else None)
         _sub = rollover_post.get(src.name)
@@ -707,7 +721,8 @@ def run_copy(files, dests, copy_jpg=True, copy_video=True, log=None):
 
 
 def write_report(event_root, professional, source, files, report, leva=None,
-                 suspects=None, rollover_warnings=None, verified_count=0):
+                 suspects=None, rollover_warnings=None, verified_count=0,
+                 mode_label="Profissional"):
     event_root.mkdir(parents=True, exist_ok=True)
     path = event_root / "relatorio-descarga.txt"
     counts = {}
@@ -717,11 +732,11 @@ def write_report(event_root, professional, source, files, report, leva=None,
         "",
         "=" * 60,
         f"Descarga: {datetime.now():%Y-%m-%d %H:%M:%S}",
-        f"Profissional: {professional}" + (f"  •  Leva: Cartao_{leva}" if leva is not None else ""),
+        f"{mode_label}: {professional}" + (f"  •  Leva: Cartao_{leva}" if leva is not None else ""),
         f"Origem (cartão): {source}",
         f"Evento: {event_root}",
         f"Encontrados: JPG={counts.get('jpg', 0)} "
-        f"RAW={counts.get('raw', 0)} Vídeo={counts.get('video', 0)}",
+        f"RAW={counts.get('raw', 0)} Vídeo={counts.get('video', 0)} Áudio={counts.get('audio', 0)}",
         f"Resultado: copiados={report['copied']} "
         f"pulados (já existiam)={report['skipped']} "
         f"falhas={report['failed']}",
@@ -744,7 +759,7 @@ def write_report(event_root, professional, source, files, report, leva=None,
 
 
 HISTORY_HEADER = ["data_hora", "profissional", "leva", "origem",
-                  "jpg", "raw", "video", "copiados", "pulados", "falhas", "devolvido"]
+                  "jpg", "raw", "video", "audio", "copiados", "pulados", "falhas", "devolvido"]
 
 
 def history_path(event_root):
@@ -768,6 +783,7 @@ def append_history(event_root, professional, leva, source, files, report):
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 professional, f"Cartao_{leva}", source,
                 counts.get("jpg", 0), counts.get("raw", 0), counts.get("video", 0),
+                counts.get("audio", 0),
                 report["copied"], report["skipped"], report["failed"], "não",
             ])
     except OSError:
@@ -889,7 +905,16 @@ class App:
         ttk.Entry(row, textvariable=self.event_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Label(row, text="(ex.: Fenalaw 2026)").pack(side="left", **pad)
 
-        ttk.Label(frm, text="3) Profissional (vira subpasta)").pack(anchor="w")
+        self.mode_var = tk.StringVar(value=cfg.get("mode", "equipe"))
+        mrow = ttk.Frame(frm)
+        mrow.pack(fill="x")
+        ttk.Label(mrow, text="Modo:").pack(side="left", **pad)
+        self.mode_combo = ttk.Combobox(mrow, textvariable=self.mode_var, values=["equipe", "multicam"], width=12, state="readonly")
+        self.mode_combo.pack(side="left", **pad)
+        ttk.Label(mrow, text="equipe = por profissional  •  multicam = por câmera (fíxa, sem operador)").pack(side="left", **pad)
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._toggle_mode())
+        self.prof_label = ttk.Label(frm, text="3) Profissional (vira subpasta)")
+        self.prof_label.pack(anchor="w")
         row = ttk.Frame(frm)
         row.pack(fill="x")
         self.prof_var = tk.StringVar(value=profs[0])
@@ -919,6 +944,7 @@ class App:
         self.copy_jpg_var = tk.BooleanVar(value=cfg.get("copy_jpg", True))
         self.copy_video_var = tk.BooleanVar(value=cfg.get("copy_video", True))
         self.copy_raw_var = tk.BooleanVar(value=cfg.get("copy_raw", True))
+        self.copy_audio_var = tk.BooleanVar(value=cfg.get("copy_audio", True))
         self.hash_var = tk.BooleanVar(value=cfg.get("verify_hash", False))
         ttk.Checkbutton(opts, text="Fazer cópias em outra unidade (02, 04, 06) — desmarque para descarregar mais rápido e fazer o backup depois",
                         variable=self.copy_enabled_var).pack(anchor="w", **pad)
@@ -930,6 +956,8 @@ class App:
         self.chk_copy_video.pack(side="left", **pad)
         self.chk_copy_raw = ttk.Checkbutton(opts2, text="Cópia do RAW (06)", variable=self.copy_raw_var)
         self.chk_copy_raw.pack(side="left", **pad)
+        self.chk_copy_audio = ttk.Checkbutton(opts2, text="Cópia do áudio (08)", variable=self.copy_audio_var)
+        self.chk_copy_audio.pack(side="left", **pad)
         ttk.Checkbutton(opts2, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
         self.copy_enabled_var.trace_add("write", lambda *_a: self._toggle_copy_options())
         self._toggle_copy_options()
@@ -1001,6 +1029,7 @@ class App:
         self.log.pack(fill="both", expand=True)
         scroll = ttk.Scrollbar(frm, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
+        self._toggle_mode()
         self._apply_theme()
 
     # ---------- ações ----------
@@ -1051,7 +1080,7 @@ class App:
             self.checklist_list.insert(
                 "end",
                 f"{r.get('data_hora', '')}  |  {r.get('profissional', '')}  |  {r.get('leva', '')}  |  "
-                f"JPG={r.get('jpg', '')} RAW={r.get('raw', '')} Vídeo={r.get('video', '')}  |  "
+                f"JPG={r.get('jpg', '')} RAW={r.get('raw', '')} Vídeo={r.get('video', '')} Áudio={r.get('audio', '')}  |  "
                 f"falhas={r.get('falhas', '')}  |  Devolvido: {r.get('devolvido', '')}")
 
     def mark_returned_selected(self):
@@ -1075,16 +1104,33 @@ class App:
         self.log.see("end")
 
     def _copy_flags(self):
-        """(jpg, vídeo, raw) efetivos: a chave mestra desliga as 3 cópias."""
+        """(jpg, vídeo, raw, áudio) efetivos: a chave mestra desliga as 4 cópias."""
         enabled = self.copy_enabled_var.get()
         return (enabled and self.copy_jpg_var.get(),
                 enabled and self.copy_video_var.get(),
-                enabled and self.copy_raw_var.get())
+                enabled and self.copy_raw_var.get(),
+                enabled and self.copy_audio_var.get())
 
     def _toggle_copy_options(self):
         state = "normal" if self.copy_enabled_var.get() else "disabled"
-        for chk in (self.chk_copy_jpg, self.chk_copy_video, self.chk_copy_raw):
+        for chk in (self.chk_copy_jpg, self.chk_copy_video, self.chk_copy_raw, self.chk_copy_audio):
             chk.configure(state=state)
+
+    def _mode_label(self):
+        return "Câmera" if self.mode_var.get() == "multicam" else "Profissional"
+
+    def _toggle_mode(self):
+        is_cam = self.mode_var.get() == "multicam"
+        self.prof_label.configure(text="3) Câmera (vira subpasta — ex.: Camera_Palco, Camera_Baterista)" if is_cam
+                                  else "3) Profissional (vira subpasta)")
+        cams = list(self.config.get("cameras") or ["Camera_Palco", "Camera_Baterista", "Camera_Teclado", "Camera_Geral"])
+        profs = list(self.config.get("professionals") or ["Fotografo_01", "Cinegrafista_01"])
+        self.prof_combo.configure(values=cams if is_cam else profs)
+        if is_cam and self.prof_var.get() not in cams:
+            self.prof_var.set(cams[0])
+        elif not is_cam and self.prof_var.get() not in profs:
+            self.prof_var.set(profs[0])
+        self._refresh_header()
 
     # ---------- visual v1.7 ----------
     def _apply_theme(self):
@@ -1137,11 +1183,19 @@ class App:
 
     def _save_current_config(self):
         prof = self.prof_var.get().strip()
-        profs = list(self.config.get("professionals") or [])
-        if prof and prof not in profs:
-            profs.insert(0, prof)
+        if self.mode_var.get() == "multicam":
+            names = list(self.config.get("cameras") or [])
+            if prof and prof not in names:
+                names.insert(0, prof)
+            self.config["cameras"] = names[:10]
+        else:
+            profs = list(self.config.get("professionals") or [])
+            if prof and prof not in profs:
+                profs.insert(0, prof)
+            self.config["professionals"] = profs[:10]
         self.config.update({
             "theme": self.theme_var.get(),
+            "mode": self.mode_var.get(),
             "base": self.base_var.get().strip(),
             "event": self.event_var.get().strip(),
             "external_base": self.external_var.get().strip(),
@@ -1149,11 +1203,14 @@ class App:
             "copy_jpg": self.copy_jpg_var.get(),
             "copy_video": self.copy_video_var.get(),
             "copy_raw": self.copy_raw_var.get(),
+            "copy_audio": self.copy_audio_var.get(),
             "verify_hash": self.hash_var.get(),
-            "professionals": profs[:10],
         })
         save_config(self.config)
-        self.prof_combo.configure(values=profs[:10])
+        if self.mode_var.get() == "multicam":
+            self.prof_combo.configure(values=list(self.config.get("cameras") or [])[:10])
+        else:
+            self.prof_combo.configure(values=list(self.config.get("professionals") or [])[:10])
 
     def _event_root(self):
         try:
@@ -1194,8 +1251,8 @@ class App:
         counts = {}
         for _p, kind, _s in self.scan:
             counts[kind] = counts.get(kind, 0) + 1
-        _cj, _cv, _cr = self._copy_flags()
-        primary, copy_total = split_needed(self.scan, _cj, _cv, _cr)
+        _cj, _cv, _cr, _ca = self._copy_flags()
+        primary, copy_total = split_needed(self.scan, _cj, _cv, _cr, _ca)
         ext_base = self.external_var.get().strip()
         if ext_base and copy_total > 0:
             d_need, ext_need = primary, copy_total
@@ -1225,6 +1282,8 @@ class App:
                 _key_paths = [_dests["jpg_sync"] / Path(_path).name] + ([_dests["jpg_copy"] / Path(_path).name] if _cj else [])
             elif _kind == "video":
                 _key_paths = [_dests["video_sync"] / Path(_path).name] + ([_dests["video_copy"] / Path(_path).name] if _cv else [])
+            elif _kind == "audio":
+                _key_paths = [_dests["audio_primary"] / Path(_path).name] + ([_dests["audio_copy"] / Path(_path).name] if _ca else [])
             else:
                 _key_paths = [_dests["raw_backup"] / Path(_path).name] + ([_dests["raw_copy"] / Path(_path).name] if _cr else [])
             if is_verified(_manifest, manifest_key(_prof, _kind, Path(_path).name, _size), _key_paths, _size, None):
@@ -1241,7 +1300,7 @@ class App:
             _rollover_txt = "\nContador zerado: " + "; ".join(f"{pre} a partir de {num:04d} (pós-virada vai para subpasta ZEROU)" for pre, num in self.rollover_warnings)
         self.preview_var.set(
             f"Encontrados: JPG={counts.get('jpg', 0)}  RAW={counts.get('raw', 0)}  "
-            f"Vídeo={counts.get('video', 0)}  Outros ignorados={self.others}\n"
+            f"Vídeo={counts.get('video', 0)}  Áudio={counts.get('audio', 0)}  Outros ignorados={self.others}\n"
             f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}{_verified_txt}{_suspect_txt}{_rollover_txt}" + ("\nCópias DESLIGADAS — só primário (mais rápido); faça o backup manual depois." if not self.copy_enabled_var.get() else "") + f"\n"
             f"Destino primário: {root}"
         )
@@ -1316,12 +1375,13 @@ class App:
             dests = destinations_for(root, prof, copy_event_root, leva=leva)
             _suspects_map = {n: r for n, r in corruption_alerts(files, source)}
             _rollover_post, _rollover_warnings = rollover_split(files)
-            _cj, _cv, _cr = self._copy_flags()
+            _cj, _cv, _cr, _ca = self._copy_flags()
             report = process_card(
                 files, dests, root, prof,
                 copy_jpg=_cj,
                 copy_video=_cv,
                 copy_raw=_cr,
+                copy_audio=_ca,
                 verify_hash=self.hash_var.get(),
                 log=lambda m: self.msg_queue.put(("log", m)),
                 manifest=manifest,
@@ -1334,7 +1394,8 @@ class App:
             total_report["errors"].extend(report["errors"])
             write_report(root, prof, source, files, report, leva=leva,
                          suspects=[(n, r) for n, r in corruption_alerts(files, source)],
-                         rollover_warnings=_rollover_warnings)
+                         rollover_warnings=_rollover_warnings,
+                         mode_label=self._mode_label())
             append_history(root, prof, leva, source, files, report)
             self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
             done += len(files)
@@ -1354,9 +1415,9 @@ class App:
             messagebox.showerror("Evento", str(exc))
             return
         primaries, copies = 0, 0
-        _cj, _cv, _cr = self._copy_flags()
+        _cj, _cv, _cr, _ca = self._copy_flags()
         for _s, _p, files, _o in jobs:
-            pr, cp = split_needed(files, _cj, _cv, _cr)
+            pr, cp = split_needed(files, _cj, _cv, _cr, _ca)
             primaries += pr
             copies += cp
         ext_base = self.external_var.get().strip()
