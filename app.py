@@ -314,16 +314,7 @@ def copy_one(src, dest_dir, src_hash=None, progress_cb=None):
                     if progress_cb:
                         progress_cb(src_size)
                     return "skipped", dest
-                # Mesmo nome e tamanho, conteúdo diferente (corrompido):
-                # apaga e recopia no mesmo nome, em vez de pular.
-                try:
-                    dest.unlink()
-                    copy_chunked(src, dest, progress_cb)
-                    if dest.stat().st_size == src_size and (src_hash is None or file_hash(dest) == src_hash):
-                        return "copied", dest
-                except Exception:
-                    pass
-                return "failed", dest
+                # Preserve the existing content; use a suffix for a hash mismatch.
         except OSError:
             pass
         # Mesmo nome, conteúdo diferente: não sobrescreve, cria sufixo.
@@ -358,7 +349,7 @@ def copy_one(src, dest_dir, src_hash=None, progress_cb=None):
     return "copied", dest
 
 
-def move_one(staged, dest_dir):
+def move_one(staged, dest_dir, src_hash=None):
     """Move (renomeia, na mesma unidade) um arquivo do staging ao destino.
 
     Se o destino já existir com o mesmo tamanho, apaga o staged e
@@ -372,7 +363,7 @@ def move_one(staged, dest_dir):
     dest = dest_dir / staged.name
     if dest.exists():
         try:
-            if dest.stat().st_size == size:
+            if _same_file(dest, size, src_hash):
                 try:
                     staged.unlink()
                 except OSError:
@@ -387,7 +378,7 @@ def move_one(staged, dest_dir):
             if not dest.exists():
                 break
             try:
-                if dest.stat().st_size == size:
+                if _same_file(dest, size, src_hash):
                     try:
                         staged.unlink()
                     except OSError:
@@ -526,7 +517,7 @@ def is_verified(manifest, key, dest_paths, size, src_hash):
         return False
     for dest in dest_paths:
         try:
-            if not dest.is_file() or dest.stat().st_size != size:
+            if not _same_file(dest, size, src_hash):
                 return False
         except OSError:
             return False
@@ -677,7 +668,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                 emit(f"Já em leva anterior: {src.name} (pulou em 01)")
                 continue
         try:
-            action, primary = move_one(staged, primary_dir)
+            action, primary = move_one(staged, primary_dir, src_hash=src_hash)
         except Exception as exc:  # noqa: BLE001
             report["failed"] += 1
             report["errors"].append(f"{src.name} -> {primary_dir}: {exc}")
@@ -892,6 +883,13 @@ class App:
         self.msg_queue = queue.Queue()
         self.copying = False
         self._build()
+        root.protocol("WM_DELETE_WINDOW", self._close)
+
+    def _close(self):
+        if self.copying:
+            messagebox.showwarning("Descarga em andamento", "Aguarde o término da cópia antes de fechar.")
+            return
+        self.root.destroy()
 
     # ---------- interface ----------
     def _build(self):
@@ -1466,7 +1464,8 @@ class App:
 
     def _run_jobs(self, jobs, root):
         """jobs: [(origem, profissional, arquivos, outros)]. Roda em thread."""
-        _cj, _cv, _cr, _ca = self._copy_flags()
+        settings = self._job_settings
+        _cj, _cv, _cr, _ca = settings["copy_flags"]
         total_bytes = 0
         for _s, _p, files, _o in jobs:
             _pr, _cp = split_needed(files, _cj, _cv, _cr, _ca)
@@ -1484,7 +1483,7 @@ class App:
                 last_pct[0] = pct
                 self.msg_queue.put(("progress_bytes", done[0]))
 
-        ext_base = self.external_var.get().strip()
+        ext_base = settings["external_base"]
         copy_event_root = (Path(ext_base) / root.name) if ext_base else None
         manifest = load_manifest(root)
         allocated = {}
@@ -1500,7 +1499,7 @@ class App:
                 copy_video=_cv,
                 copy_raw=_cr,
                 copy_audio=_ca,
-                verify_hash=self.hash_var.get(),
+                verify_hash=settings["verify_hash"],
                 log=lambda m: self.msg_queue.put(("log", m)),
                 manifest=manifest,
                 rollover_post=_rollover_post,
@@ -1514,11 +1513,17 @@ class App:
             write_report(root, prof, source, files, report, leva=leva,
                          suspects=[(n, r) for n, r in corruption_alerts(files, source)],
                          rollover_warnings=_rollover_warnings,
-                         mode_label=self._mode_label())
+                         mode_label=settings["mode_label"])
             append_history(root, prof, leva, source, files, report)
             self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
             self.msg_queue.put(("log", f"Cartão {prof}: copiados={report['copied']} pulados={report['skipped']} falhas={report['failed']}"))
         self.msg_queue.put(("done", (total_report, root / "relatorio-descarga.txt")))
+
+    def _run_jobs_safely(self, jobs, root):
+        try:
+            self._run_jobs(jobs, root)
+        except Exception as exc:
+            self.msg_queue.put(("error", str(exc)))
 
     def _start_jobs(self, jobs):
         if self.copying:
@@ -1538,6 +1543,13 @@ class App:
             primaries += pr
             copies += cp
         ext_base = self.external_var.get().strip()
+        for source, _prof, _files, _others in jobs:
+            targets = [root]
+            if ext_base and copies:
+                targets.append(Path(ext_base) / root.name)
+            if not Path(source).is_dir() or any(not self._check_source_dest(source, target) for target in targets):
+                messagebox.showerror("Origem e destino", "Origem indisponível ou sobreposta ao destino primário/cópias.")
+                return
         d_need = primaries if (ext_base and copies > 0) else primaries + copies
         free = free_space_for(self.base_var.get().strip())
         if free is not None and free < d_need:
@@ -1551,6 +1563,9 @@ class App:
                                                      f"({fmt_bytes(copies)}). Continuar mesmo assim?"):
                     return
         self._save_current_config()
+        # Freeze Tk values on the UI thread; changing a field cannot redirect an active job.
+        self._job_settings = {"copy_flags": (_cj, _cv, _cr, _ca), "external_base": ext_base,
+                              "verify_hash": self.hash_var.get(), "mode_label": self._mode_label()}
         self.copying = True
         self.last_success = False
         self.btn_eject.config(state="disabled")
@@ -1560,7 +1575,7 @@ class App:
         self.progress["value"] = 0
         self.progress_var.set("0%")
         self.status_var.set("Copiando…")
-        threading.Thread(target=self._run_jobs, args=(jobs, root), daemon=True).start()
+        threading.Thread(target=self._run_jobs_safely, args=(jobs, root), daemon=True).start()
         self.root.after(200, self._poll)
 
     def start_copy(self):
@@ -1627,6 +1642,16 @@ class App:
                     self.progress["maximum"] = payload
                 elif kind == "log":
                     self._log(payload)
+                elif kind == "error":
+                    self.copying = False
+                    self.last_success = False
+                    self.btn_copy.config(state="normal")
+                    self.btn_scan.config(state="normal")
+                    self.btn_eject.config(state="disabled")
+                    self.status_var.set("Descarga interrompida — confira o registro e mantenha o cartão.")
+                    self._log(f"FALHA: {payload}")
+                    messagebox.showerror("Descarga interrompida", payload)
+                    return
                 elif kind == "done":
                     report, report_path = payload
                     self.copying = False

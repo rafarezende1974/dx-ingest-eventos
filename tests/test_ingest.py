@@ -57,6 +57,23 @@ class IngestTests(unittest.TestCase):
         target.write_bytes(b"z" * target.stat().st_size)
         self.assertEqual(self.run_card()["failed"], 0)
         self.assertIn(self.original[target.name], [p.read_bytes() for p in target.parent.iterdir()])
+        self.assertEqual(target.read_bytes(), b"z" * target.stat().st_size)
+
+    def test_primary_collision_preserves_both_contents(self):
+        self.run_card()
+        target = self.dests["raw_backup"] / "photo.cr3"
+        target.write_bytes(b"z" * target.stat().st_size)
+        self.assertEqual(self.run_card()["failed"], 0)
+        self.assertEqual(target.read_bytes(), b"z" * target.stat().st_size)
+        self.assertEqual((target.parent / "photo_1.cr3").read_bytes(), self.original[target.name])
+
+    def test_worker_exception_is_reported(self):
+        import queue
+        ui = app.App.__new__(app.App)
+        ui.msg_queue = queue.Queue()
+        with patch.object(ui, "_run_jobs", side_effect=OSError("unplugged")):
+            ui._run_jobs_safely([], self.event)
+        self.assertEqual(ui.msg_queue.get_nowait(), ("error", "unplugged"))
 
     def test_staging_failure_never_publishes(self):
         with patch.object(app, "copy_one", side_effect=OSError("disk unavailable")):
