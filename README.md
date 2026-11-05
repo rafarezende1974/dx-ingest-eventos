@@ -2,12 +2,14 @@
 
 Branch isolada: `codex/editor-assistente-v2`. Não é uma release de produção.
 
-## Primeira etapa da interface
+## Interface neon — 2.0.0-dev.2
 
-- Tema escuro inicial, menu lateral com navegação para seções e cartões CustomTkinter de JPG, RAW, vídeo e áudio com contagens e tamanhos reais da análise.
-- Ações, discos, progresso por bytes e status no topo; fila, checklist, equipe/multicâmera e registro preservados.
-- Migração incremental: controles de formulário e listas continuam em Tk/ttk. O mockup original não estava acessível; esta etapa segue os elementos descritos, ainda sem validação de fidelidade visual.
-- Preferência de tema da v2 separada, mantendo as demais configurações existentes.
+- Tela principal reconstruída em CustomTkinter com base no mockup fornecido: identidade roxa/ciano, ícones, origem à esquerda, quatro cartões de mídia, progresso central, discos e fila visível. Não usa rolagem geral.
+- Menu navega entre descarga, histórico, relatórios e configurações. O evento permanece visível e pode ser travado. Campos de caminhos e opções por tipo ficam nas configurações.
+- Fila com seleção e estados reais de espera, cópia e conferência; edição da fila bloqueada durante execução.
+- Arquivo atual e ritmo de processamento por bytes, com estimativa de tempo restante. O ritmo inclui bytes conferidos/pulados na retomada, portanto não equivale à velocidade física do disco. Nenhum dado de progresso demonstrativo é usado.
+- Discos mostram espaço livre real; barras representam a proporção livre. Dados indisponíveis são indicados sem inventar capacidade.
+- Tema neon escuro nesta prévia; preferências e dados antigos continuam compatíveis. A interface clássica permanece no código como base do controlador, mas o executável abre a nova interface.
 
 ## Segurança e compatibilidade
 
@@ -33,10 +35,10 @@ O artefato `editor-assistente-v2-preview` contém **a pasta completa**: extraia 
 
 ## Antes de aprovar merge
 
-- Revisão visual com o mockup original e teste em diferentes escalas de tela/DPI.
+- Revisão do acabamento com o usuário e teste em diferentes escalas de tela/DPI. A implementação segue a composição do mockup, sem prometer reprodução pixel a pixel dos brilhos e gradientes da imagem.
 - Teste manual em cartões e discos físicos, inclusive desconexão e pouco espaço.
 - Testes automatizados usam conteúdo sintético: não validam codecs nem integridade fotográfica/audiovisual.
-- A análise ainda é síncrona; cartões grandes podem deixar a interface ocupada durante a varredura/hash.
+- A análise ainda é síncrona; cartões grandes podem deixar a interface ocupada durante a varredura.
 - A verificação sem SHA-256 continua comparando tamanho, como na versão anterior. A retomada de colisões com sufixo pode refazer staging; prioriza preservação sobre desempenho.
 
 Nenhum merge ou release deve ser realizado sem aprovação do responsável.

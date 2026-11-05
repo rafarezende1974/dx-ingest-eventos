@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "2.0.0-dev.1"
+VERSION = "2.0.0-dev.2"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -585,6 +585,7 @@ def process_card(files, dests, event_root, professional, copy_jpg=True,
                 report["errors"].append(f"{src.name} -> {dest_dir}")
 
     for src, kind, _size in files:
+        emit(f"Arquivo: {src.name}")
         if src.name in (suspects or {}):
             emit(f"ALERTA — pode estar corrompido/interrompido: {src.name} ({suspects[src.name]}). "
                  "Vai ser copiado mesmo assim; não formate o cartão antes de ver.")
@@ -1488,6 +1489,7 @@ class App:
         manifest = load_manifest(root)
         allocated = {}
         for source, prof, files, _others in jobs:
+            self.msg_queue.put(("job_state", (source, prof, "Copiando")))
             leva = next_leva_number(root, prof) + allocated.get(prof, 0)
             allocated[prof] = allocated.get(prof, 0) + 1
             dests = destinations_for(root, prof, copy_event_root, leva=leva)
@@ -1515,6 +1517,7 @@ class App:
                          rollover_warnings=_rollover_warnings,
                          mode_label=settings["mode_label"])
             append_history(root, prof, leva, source, files, report)
+            self.msg_queue.put(("job_state", (source, prof, "Conferido" if report["failed"] == 0 else "Falha — ver relatório")))
             self.msg_queue.put(("log", f"Cartão {prof} / Cartao_{leva} registrado no checklist."))
             self.msg_queue.put(("log", f"Cartão {prof}: copiados={report['copied']} pulados={report['skipped']} falhas={report['failed']}"))
         self.msg_queue.put(("done", (total_report, root / "relatorio-descarga.txt")))
@@ -1642,6 +1645,8 @@ class App:
                     self.progress["maximum"] = payload
                 elif kind == "log":
                     self._log(payload)
+                elif kind == "job_state" and hasattr(self, "_on_job_state"):
+                    self._on_job_state(payload)
                 elif kind == "error":
                     self.copying = False
                     self.last_success = False
@@ -1756,18 +1761,21 @@ def show_splash(root):
 
 
 def main():
-    root = tk.Tk()
+    from neon import NeonApp
+    import customtkinter as ctk
+    ctk.set_appearance_mode("dark")
+    root = ctk.CTk()
     root.withdraw()
     if "--smoke-test" in sys.argv:
         # Exercise bundled widgets/theme/fonts without reading user configuration.
-        global load_config
-        load_config = lambda: {}
-        App(root)
+        import neon
+        neon.core.load_config = lambda: {}
+        NeonApp(root)
         root.update_idletasks()
         root.destroy()
         return
     splash = show_splash(root)
-    App(root)
+    NeonApp(root)
     if splash is not None:
         root.after(1500, lambda: (splash.destroy(), root.deiconify()))
     else:
