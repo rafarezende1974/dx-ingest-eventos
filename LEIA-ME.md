@@ -1,3 +1,19 @@
+# Editor Assistente v1.8.3 — evento em primeiro + trava do evento + cópias ocultas
+
+- **Evento em primeiro lugar:** o campo "1) Evento" (data + nome) agora
+  fica antes do cartão de origem — é ele que define a pasta do evento
+  e não muda durante o dia. O cartão virou "2)", o profissional "3)"
+  e a pasta base "4)".
+- **Travar o evento:** botão "Travar" ao lado do nome do evento. Travado,
+  a data e o nome ficam bloqueados para edição — não dá para apagar sem
+  querer no meio do uso. "Destravar" libera de novo. A trava é salva e
+  lembrada na próxima abertura.
+- **Cópias só aparecem se ligadas:** a chave mestra "Fazer cópias em
+  outra unidade (02, 04, 06, 08)" agora fica antes da pasta das cópias.
+  Desmarcada, a pasta das cópias, os checkboxes de quais cópias fazer
+  (JPG 02, vídeo 04, RAW 06, áudio 08) e o cartão de destino das cópias
+  ficam ocultos — a tela fica só com o primário. Marcada, tudo reaparece.
+
 # Editor Assistente v1.8.2 — progresso gradativo por bytes + visual do mockup
 
 - **Progresso de verdade:** antes a barra só era atualizada uma vez por

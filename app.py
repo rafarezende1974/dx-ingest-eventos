@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.8.2"
+VERSION = "1.8.3"
 
 # Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
 # Só visual — nenhuma função muda.
@@ -927,22 +927,29 @@ class App:
         self.header_badge.pack(side="right", padx=12)
         ttk.Button(self.header_frame, text="Tema: claro/escuro", command=self._toggle_theme).pack(side="right", padx=(0, 4))
 
-        ttk.Label(frm, text="1) Cartão / pasta de origem").pack(anchor="w")
+        # 1) Evento em primeiro: é o que define a pasta do evento e não muda
+        # durante o dia — por isso tem o botão de travar (v1.8.3).
+        ttk.Label(frm, text="1) Evento").pack(anchor="w")
+        row = ttk.Frame(frm)
+        row.pack(fill="x")
+        self.date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.ent_date = ttk.Entry(row, textvariable=self.date_var, width=14)
+        self.ent_date.pack(side="left", **pad)
+        self.event_var = tk.StringVar(value=cfg.get("event", ""))
+        self.ent_event = ttk.Entry(row, textvariable=self.event_var)
+        self.ent_event.pack(side="left", fill="x", expand=True, **pad)
+        self.event_locked_var = tk.BooleanVar(value=cfg.get("event_locked", False))
+        self.btn_lock_event = ttk.Button(row, text="Travar", command=self._toggle_event_lock)
+        self.btn_lock_event.pack(side="left", **pad)
+        ttk.Label(row, text="(ex.: Fenalaw 2026)").pack(side="left", **pad)
+
+        ttk.Label(frm, text="2) Cartão / pasta de origem").pack(anchor="w")
         row = ttk.Frame(frm)
         row.pack(fill="x")
         self.source_var = tk.StringVar()
         ttk.Entry(row, textvariable=self.source_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Button(row, text="Procurar...", command=self._pick_source).pack(side="left", **pad)
         ttk.Button(row, text="Cartões plugados...", command=self._pick_removable).pack(side="left", **pad)
-
-        ttk.Label(frm, text="2) Evento").pack(anchor="w")
-        row = ttk.Frame(frm)
-        row.pack(fill="x")
-        self.date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
-        ttk.Entry(row, textvariable=self.date_var, width=14).pack(side="left", **pad)
-        self.event_var = tk.StringVar(value=cfg.get("event", ""))
-        ttk.Entry(row, textvariable=self.event_var).pack(side="left", fill="x", expand=True, **pad)
-        ttk.Label(row, text="(ex.: Fenalaw 2026)").pack(side="left", **pad)
 
         self.mode_var = tk.StringVar(value=cfg.get("mode", "equipe"))
         mrow = ttk.Frame(frm)
@@ -970,13 +977,8 @@ class App:
         ttk.Entry(row, textvariable=self.base_var).pack(side="left", fill="x", expand=True, **pad)
         ttk.Button(row, text="Procurar...", command=self._pick_base).pack(side="left", **pad)
 
-        ttk.Label(frm, text="5) Pasta das cópias (02, 04, 06, 08) — outra unidade/pasta (ex.: E:\\Copias). Se vazia, as cópias ficam em D:", wraplength=740, justify="left").pack(anchor="w")
-        row = ttk.Frame(frm)
-        row.pack(fill="x")
-        self.external_var = tk.StringVar(value=cfg.get("external_base", ""))
-        ttk.Entry(row, textvariable=self.external_var).pack(side="left", fill="x", expand=True, **pad)
-        ttk.Button(row, text="Procurar...", command=self._pick_external).pack(side="left", **pad)
-
+        # Chave mestra das cópias ANTES da pasta das cópias: com ela desligada,
+        # a pasta das cópias e os checkboxes por tipo ficam ocultos (v1.8.3).
         opts = ttk.Frame(frm)
         opts.pack(fill="x", pady=4)
         self.copy_enabled_var = tk.BooleanVar(value=cfg.get("copy_enabled", True))
@@ -989,7 +991,15 @@ class App:
                         variable=self.copy_enabled_var).pack(anchor="w", **pad)
         ttk.Label(opts, text="Desmarque para descarregar mais rápido e fazer o backup depois.",
                   style="Muted.TLabel").pack(anchor="w", padx=8)
-        opts2 = ttk.Frame(frm)
+
+        self.copies_frame = ttk.Frame(frm)
+        ttk.Label(self.copies_frame, text="5) Pasta das cópias (02, 04, 06, 08) — outra unidade/pasta (ex.: E:\\Copias). Se vazia, as cópias ficam em D:", wraplength=740, justify="left").pack(anchor="w")
+        row = ttk.Frame(self.copies_frame)
+        row.pack(fill="x")
+        self.external_var = tk.StringVar(value=cfg.get("external_base", ""))
+        ttk.Entry(row, textvariable=self.external_var).pack(side="left", fill="x", expand=True, **pad)
+        ttk.Button(row, text="Procurar...", command=self._pick_external).pack(side="left", **pad)
+        opts2 = ttk.Frame(self.copies_frame)
         opts2.pack(fill="x", pady=0)
         self.chk_copy_jpg = ttk.Checkbutton(opts2, text="Cópia do JPG (02)", variable=self.copy_jpg_var)
         self.chk_copy_jpg.pack(side="left", **pad)
@@ -999,9 +1009,9 @@ class App:
         self.chk_copy_raw.pack(side="left", **pad)
         self.chk_copy_audio = ttk.Checkbutton(opts2, text="Cópia do áudio (08)", variable=self.copy_audio_var)
         self.chk_copy_audio.pack(side="left", **pad)
-        opts3 = ttk.Frame(frm)
-        opts3.pack(fill="x", pady=0)
-        ttk.Checkbutton(opts3, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
+        self._hash_frame = ttk.Frame(frm)
+        self._hash_frame.pack(fill="x", pady=0)
+        ttk.Checkbutton(self._hash_frame, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
         self.copy_enabled_var.trace_add("write", lambda *_a: self._toggle_copy_options())
         self._toggle_copy_options()
 
@@ -1078,6 +1088,8 @@ class App:
         scroll = ttk.Scrollbar(frm, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         self._toggle_mode()
+        self._apply_event_lock()
+        self._toggle_copy_options()
         self._apply_theme()
 
     # ---------- ações ----------
@@ -1160,9 +1172,36 @@ class App:
                 enabled and self.copy_audio_var.get())
 
     def _toggle_copy_options(self):
-        state = "normal" if self.copy_enabled_var.get() else "disabled"
-        for chk in (self.chk_copy_jpg, self.chk_copy_video, self.chk_copy_raw, self.chk_copy_audio):
-            chk.configure(state=state)
+        """Chave mestra das cópias: desligada, esconde a pasta das cópias,
+        os checkboxes por tipo e o cartão de destino das cópias."""
+        enabled = self.copy_enabled_var.get()
+        if hasattr(self, "copies_frame"):
+            if enabled:
+                if hasattr(self, "_hash_frame"):
+                    self.copies_frame.pack(fill="x", before=self._hash_frame)
+                else:
+                    self.copies_frame.pack(fill="x")
+            else:
+                self.copies_frame.pack_forget()
+        if hasattr(self, "card_c_frame"):
+            if enabled:
+                self.card_c_frame.pack(side="left", fill="both", expand=True, padx=(4, 0))
+            else:
+                self.card_c_frame.pack_forget()
+
+    def _toggle_event_lock(self):
+        """Trava/destrava a data e o nome do evento: travado, não dá para
+        apagar sem querer durante o uso no dia (v1.8.3)."""
+        self.event_locked_var.set(not self.event_locked_var.get())
+        self._apply_event_lock()
+        self._save_current_config()
+
+    def _apply_event_lock(self):
+        locked = self.event_locked_var.get()
+        state = "disabled" if locked else "normal"
+        for ent in (self.ent_date, self.ent_event):
+            ent.configure(state=state)
+        self.btn_lock_event.configure(text="Destravar" if locked else "Travar")
 
     def _mode_label(self):
         return "Câmera" if self.mode_var.get() == "multicam" else "Profissional"
@@ -1253,6 +1292,7 @@ class App:
             "event": self.event_var.get().strip(),
             "external_base": self.external_var.get().strip(),
             "copy_enabled": self.copy_enabled_var.get(),
+            "event_locked": self.event_locked_var.get(),
             "copy_jpg": self.copy_jpg_var.get(),
             "copy_video": self.copy_video_var.get(),
             "copy_raw": self.copy_raw_var.get(),
