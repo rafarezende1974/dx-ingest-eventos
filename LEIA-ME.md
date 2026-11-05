@@ -1,3 +1,17 @@
+# Editor Assistente v1.7.0 — novo visual (inspirado no Descarrega, só visual)
+
+- **Cabeçalho do evento:** cartão no topo com o nome do evento, a
+  data e um selo com o nome do profissional, numa cor que é sempre
+  a mesma para aquele profissional (paleta fixa de 6 cores).
+- **Cartões de destino:** "Primário (D:) — 01, 03, 05" e "Cópias
+  (outra unidade) — 02, 04, 06", cada um com a sua barra de espaço.
+- **Progresso grande:** barra alta com o percentual em destaque e
+  uma linha de status ("Pronto", "Copiando…", "Concluído").
+- **Tema claro/escuro:** botão "Tema: claro/escuro" no cabeçalho;
+  a escolha é salva e lembrada na próxima abertura.
+- Nenhuma função mudou: pastas, levas, checklist, manifest,
+  retomada, alertas e a chave de cópias continuam iguais.
+
 # Editor Assistente v1.6.1 — cópias como opção (mais rápido sem backup na hora)
 
 - Nova chave mestra **"Fazer cópias em outra unidade (02, 04, 06)"**,

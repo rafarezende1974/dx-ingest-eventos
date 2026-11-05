@@ -49,7 +49,28 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
+
+# Visual v1.7 (inspirado no Descarrega: cartões, cabeçalho, cor por pessoa).
+# Só visual — nenhuma função muda.
+PROF_COLORS = ["#2563EB", "#16A34A", "#D97706", "#DB2777", "#7C3AED", "#0891B2"]
+ACCENT = "#22C55E"
+
+THEMES = {
+    "claro": {"bg": "#F4F5F7", "card": "#FFFFFF", "fg": "#111827",
+              "muted": "#6B7280", "entry": "#FFFFFF", "list": "#FFFFFF",
+              "list_fg": "#111827", "bar_bg": "#E5E7EB"},
+    "escuro": {"bg": "#111827", "card": "#1F2937", "fg": "#F9FAFB",
+               "muted": "#9CA3AF", "entry": "#374151", "list": "#1F2937",
+               "list_fg": "#F9FAFB", "bar_bg": "#374151"},
+}
+
+
+def prof_color(name):
+    """Cor determinística por profissional (mesmo nome, sempre a mesma)."""
+    if not name:
+        return "#6B7280"
+    return PROF_COLORS[sum(name.encode("utf-8")) % len(PROF_COLORS)]
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -815,7 +836,7 @@ class App:
                 root._icon_photo = photo
         except Exception:
             pass
-        root.geometry("760x640")
+        root.geometry("780x780")
         root.minsize(680, 560)
         self.scan = []
         self.others = 0
@@ -834,6 +855,22 @@ class App:
         frm.pack(fill="both", expand=True, padx=10, pady=10)
         cfg = self.config
         profs = cfg.get("professionals") or ["Fotografo_01", "Cinegrafista_01"]
+        self.theme_var = tk.StringVar(value=cfg.get("theme", "claro"))
+
+        # Cabeçalho do evento (visual v1.7): cartão com evento, data e selo do profissional.
+        self.header_frame = tk.Frame(frm, relief="flat", bd=0, highlightthickness=1,
+                                     highlightbackground="#E5E7EB")
+        self.header_frame.pack(fill="x", pady=(0, 10))
+        _hleft = ttk.Frame(self.header_frame, style="Card.TFrame")
+        _hleft.pack(side="left", fill="x", expand=True, padx=12, pady=10)
+        self.header_title = ttk.Label(_hleft, text="Editor Assistente", style="Title.Card.TLabel", anchor="w")
+        self.header_title.pack(anchor="w")
+        self.header_sub = ttk.Label(_hleft, text="", style="Muted.Card.TLabel", anchor="w")
+        self.header_sub.pack(anchor="w")
+        self.header_badge = tk.Label(self.header_frame, text="—", font=("Segoe UI", 11, "bold"),
+                                     bg="#6B7280", fg="white", padx=14, pady=6)
+        self.header_badge.pack(side="right", padx=12)
+        ttk.Button(self.header_frame, text="Tema: claro/escuro", command=self._toggle_theme).pack(side="right", padx=(0, 4))
 
         ttk.Label(frm, text="1) Cartão / pasta de origem").pack(anchor="w")
         row = ttk.Frame(frm)
@@ -859,6 +896,8 @@ class App:
         self.prof_combo = ttk.Combobox(row, textvariable=self.prof_var, values=profs)
         self.prof_combo.pack(side="left", fill="x", expand=True, **pad)
         ttk.Label(row, text="ex.: Fotografo_01, Cinegrafista_01").pack(side="left", **pad)
+        for _var in (self.event_var, self.date_var, self.prof_var):
+            _var.trace_add("write", lambda *_a: self._refresh_header())
 
         ttk.Label(frm, text="4) Pasta base de destino (normalmente D:\\Eventos)").pack(anchor="w")
         row = ttk.Frame(frm)
@@ -931,21 +970,38 @@ class App:
         self.preview_var = tk.StringVar(value="Clique em “Analisar cartão” para ver o que será copiado.")
         ttk.Label(frm, textvariable=self.preview_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
+        # Cartões de destino (visual v1.7): um cartão por destino, com barra de espaço.
+        cards = ttk.Frame(frm)
+        cards.pack(fill="x", pady=4)
+        card_p = ttk.LabelFrame(cards, text="Primário (D:) — 01, 03, 05", style="Card.TLabelframe")
+        card_p.pack(side="left", fill="both", expand=True, padx=(0, 4))
         self.space_var = tk.StringVar(value="Espaço: analise o cartão para ver quanto cabe.")
-        ttk.Label(frm, textvariable=self.space_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
-        self.space_bar = ttk.Progressbar(frm, mode="determinate", maximum=100)
-        self.space_bar.pack(fill="x", pady=2)
+        ttk.Label(card_p, textvariable=self.space_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
+        self.space_bar = ttk.Progressbar(card_p, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_bar.pack(fill="x", padx=8, pady=(0, 8))
+        card_c = ttk.LabelFrame(cards, text="Cópias (outra unidade) — 02, 04, 06", style="Card.TLabelframe")
+        card_c.pack(side="left", fill="both", expand=True, padx=(4, 0))
         self.space_copy_var = tk.StringVar(value="")
-        ttk.Label(frm, textvariable=self.space_copy_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
+        ttk.Label(card_c, textvariable=self.space_copy_var, wraplength=330, justify="left", style="Card.TLabel").pack(anchor="w", fill="x", padx=8, pady=4)
+        self.space_copy_bar = ttk.Progressbar(card_c, mode="determinate", maximum=100, style="Space.Horizontal.TProgressbar")
+        self.space_copy_bar.pack(fill="x", padx=8, pady=(0, 8))
 
-        self.progress = ttk.Progressbar(frm, mode="determinate")
-        self.progress.pack(fill="x", pady=6)
+        # Progresso grande (visual v1.7): barra alta + percentual + status.
+        prow = ttk.Frame(frm)
+        prow.pack(fill="x", pady=6)
+        self.progress_var = tk.StringVar(value="0%")
+        ttk.Label(prow, textvariable=self.progress_var, font=("Segoe UI", 16, "bold")).pack(side="left", padx=(0, 10))
+        self.progress = ttk.Progressbar(prow, mode="determinate", style="Green.Horizontal.TProgressbar")
+        self.progress.pack(side="left", fill="x", expand=True)
+        self.status_var = tk.StringVar(value="Pronto.")
+        ttk.Label(frm, textvariable=self.status_var, wraplength=720, justify="left").pack(anchor="w", fill="x")
 
         ttk.Label(frm, text="Registro").pack(anchor="w")
-        self.log = tk.Text(frm, height=10, wrap="word")
+        self.log = tk.Text(frm, height=6, wrap="word")
         self.log.pack(fill="both", expand=True)
         scroll = ttk.Scrollbar(frm, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
+        self._apply_theme()
 
     # ---------- ações ----------
     def _pick_source(self):
@@ -1030,12 +1086,62 @@ class App:
         for chk in (self.chk_copy_jpg, self.chk_copy_video, self.chk_copy_raw):
             chk.configure(state=state)
 
+    # ---------- visual v1.7 ----------
+    def _apply_theme(self):
+        mode = self.theme_var.get() if hasattr(self, "theme_var") else "claro"
+        th = THEMES.get(mode, THEMES["claro"])
+        self.root.configure(bg=th["bg"])
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("TFrame", background=th["bg"])
+        style.configure("TLabel", background=th["bg"], foreground=th["fg"])
+        style.configure("Card.TFrame", background=th["card"])
+        style.configure("Card.TLabel", background=th["card"], foreground=th["fg"])
+        style.configure("Card.TLabelframe", background=th["card"], foreground=th["fg"])
+        style.configure("Card.TLabelframe.Label", background=th["card"], foreground=th["fg"])
+        style.configure("Title.Card.TLabel", background=th["card"], foreground=th["fg"], font=("Segoe UI", 14, "bold"))
+        style.configure("Muted.Card.TLabel", background=th["card"], foreground=th["muted"])
+        style.configure("TButton", background=th["card"], foreground=th["fg"])
+        style.configure("Accent.TButton", background=ACCENT, foreground="white")
+        style.configure("TCheckbutton", background=th["bg"], foreground=th["fg"])
+        style.configure("TEntry", fieldbackground=th["entry"], foreground=th["fg"])
+        style.configure("TCombobox", fieldbackground=th["entry"], foreground=th["fg"])
+        style.configure("Green.Horizontal.TProgressbar", background=ACCENT, troughcolor=th["bar_bg"], thickness=22)
+        style.configure("Space.Horizontal.TProgressbar", background=ACCENT, troughcolor=th["bar_bg"], thickness=10)
+        for w in (getattr(self, "queue_list", None), getattr(self, "checklist_list", None)):
+            if w is not None:
+                w.configure(bg=th["list"], fg=th["list_fg"])
+        if hasattr(self, "log"):
+            self.log.configure(bg=th["list"], fg=th["list_fg"], insertbackground=th["fg"])
+        if hasattr(self, "header_frame"):
+            self.header_frame.configure(bg=th["card"])
+        self._refresh_header()
+
+    def _toggle_theme(self):
+        self.theme_var.set("escuro" if self.theme_var.get() == "claro" else "claro")
+        self._save_current_config()
+        self._apply_theme()
+
+    def _refresh_header(self):
+        if not hasattr(self, "header_title"):
+            return
+        event = self.event_var.get().strip() if hasattr(self, "event_var") else ""
+        date = self.date_var.get().strip() if hasattr(self, "date_var") else ""
+        prof = self.prof_var.get().strip() if hasattr(self, "prof_var") else ""
+        self.header_title.configure(text=event or "Editor Assistente")
+        self.header_sub.configure(text=f"{date}  •  {prof}" if (date or prof) else "Escolha o cartão, o evento e o profissional")
+        self.header_badge.configure(text=prof or "—", bg=prof_color(prof), fg="white")
+
     def _save_current_config(self):
         prof = self.prof_var.get().strip()
         profs = list(self.config.get("professionals") or [])
         if prof and prof not in profs:
             profs.insert(0, prof)
         self.config.update({
+            "theme": self.theme_var.get(),
             "base": self.base_var.get().strip(),
             "event": self.event_var.get().strip(),
             "external_base": self.external_var.get().strip(),
@@ -1158,6 +1264,15 @@ class App:
                 self.space_copy_var.set(f"Espaço nas cópias: livre {fmt_bytes(_ext_free) if _ext_free is not None else '—'}  •  Necessário: {fmt_bytes(copy_total)}")
         else:
             self.space_copy_var.set("")
+        try:
+            if ext_base:
+                _eu = shutil.disk_usage(str(Path(ext_base).anchor or ext_base))
+                self.space_copy_bar["value"] = 100.0 * (_eu.total - _eu.free) / _eu.total if _eu.total else 0
+            else:
+                self.space_copy_bar["value"] = 0
+        except Exception:
+            self.space_copy_bar["value"] = 0
+        self.status_var.set("Análise pronta — confira os números e clique em “Descarregar”.")
         self._log(f"Análise: {counts} | outros={self.others} | primário={fmt_bytes(primary)} | cópias={fmt_bytes(copy_total)} | livre D:={free_txt} | par JPG/RAW sem par: {jpg_no_raw}/{raw_no_jpg}")
 
     def add_to_queue(self):
@@ -1265,6 +1380,8 @@ class App:
         self.btn_scan.config(state="disabled")
         self.progress["maximum"] = max(1, sum(len(files) for _s, _p, files, _o in jobs))
         self.progress["value"] = 0
+        self.progress_var.set("0%")
+        self.status_var.set("Copiando…")
         threading.Thread(target=self._run_jobs, args=(jobs, root), daemon=True).start()
         self.root.after(200, self._poll)
 
@@ -1316,6 +1433,8 @@ class App:
                 kind, payload = self.msg_queue.get_nowait()
                 if kind == "progress":
                     self.progress["value"] = payload
+                    _max = self.progress["maximum"] or 1
+                    self.progress_var.set(f"{100 * payload // _max}%")
                 elif kind == "total":
                     self.progress["maximum"] = payload
                 elif kind == "log":
@@ -1323,6 +1442,8 @@ class App:
                 elif kind == "done":
                     report, report_path = payload
                     self.copying = False
+                    self.progress_var.set("100%")
+                    self.status_var.set("Concluído." if report["failed"] == 0 else "Concluído com falhas — veja o relatório antes de ejetar.")
                     self.refresh_checklist()
                     self.btn_copy.config(state="normal")
                     self.btn_scan.config(state="normal")
