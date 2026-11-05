@@ -58,8 +58,9 @@ class IngestService : Service() {
         val prefs = getSharedPreferences("config", MODE_PRIVATE)
         prefs.edit().putString("lastReport", log.name).apply()
         fun record(line: String) {
-            log.appendText("${LocalDateTime.now()} | $line\n", Charsets.UTF_8)
-            state.update { it.copy(report = log.readText().takeLast(24000)) }
+            val entry = "${LocalDateTime.now()} | $line\n"
+            log.appendText(entry, Charsets.UTF_8)
+            state.update { it.copy(report = (it.report + entry).takeLast(24000)) }
         }
         try {
             wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
