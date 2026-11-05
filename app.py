@@ -352,8 +352,8 @@ def copy_one(src, dest_dir, src_hash=None, progress_cb=None):
 def move_one(staged, dest_dir, src_hash=None):
     """Move (renomeia, na mesma unidade) um arquivo do staging ao destino.
 
-    Se o destino já existir com o mesmo tamanho, apaga o staged e
-    retorna skipped. Nunca sobrescreve.
+    Se o destino já existir com mesmo tamanho e hash (quando solicitado),
+    remove apenas o staged e retorna skipped. Nunca sobrescreve o destino.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -1245,7 +1245,7 @@ class App:
         style.configure("Muted.TLabel", background=th["bg"], foreground=th["muted"])
         from dashboard import polish_styles
         polish_styles(self.root)
-        self._canvas.configure(bg=th["bg" ])
+        self._canvas.configure(bg=th["bg"])
         style.configure("TButton", background=th["card"], foreground=th["fg"])
         style.configure("Accent.TButton", background=ACCENT, foreground="white")
         style.configure("TCheckbutton", background=th["bg"], foreground=th["fg"])

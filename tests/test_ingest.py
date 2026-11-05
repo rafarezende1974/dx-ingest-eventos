@@ -75,6 +75,24 @@ class IngestTests(unittest.TestCase):
             ui._run_jobs_safely([], self.event)
         self.assertEqual(ui.msg_queue.get_nowait(), ("error", "unplugged"))
 
+    def test_multicamera_queue_reports_and_backups(self):
+        import queue
+        ui = app.App.__new__(app.App)
+        ui.msg_queue = queue.Queue()
+        ui._job_settings = {"copy_flags": (True,) * 4, "external_base": str(self.base / "copies"),
+                            "verify_hash": True, "mode_label": "Câmera"}
+        jobs = [(str(self.source), name, self.files, 0) for name in ("Camera_Palco", "Camera_Geral")]
+        ui._run_jobs_safely(jobs, self.event)
+        events = []
+        while not ui.msg_queue.empty():
+            events.append(ui.msg_queue.get_nowait())
+        self.assertEqual(events[-1][0], "done")
+        self.assertEqual(events[-1][1][0]["failed"], 0)
+        self.assertEqual(len(app.read_history(self.event)), 2)
+        for name in ("Camera_Palco", "Camera_Geral"):
+            self.assertEqual((self.event / "01_Fotos_JPG" / name / "Cartao_1" / "photo.jpg").read_bytes(),
+                             self.original["photo.jpg"])
+
     def test_staging_failure_never_publishes(self):
         with patch.object(app, "copy_one", side_effect=OSError("disk unavailable")):
             report = self.run_card()
