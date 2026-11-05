@@ -5,3 +5,6 @@ dist/
 assets/
 *.spec
 dx-ingest-config.json
+android/.gradle/
+android/**/build/
+android/local.properties
