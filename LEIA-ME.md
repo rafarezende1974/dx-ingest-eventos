@@ -1,3 +1,13 @@
+# Editor Assistente v1.6.1 — cópias como opção (mais rápido sem backup na hora)
+
+- Nova chave mestra **"Fazer cópias em outra unidade (02, 04, 06)"**,
+  ligada por padrão. Desmarcada, a descarga vai só para o primário
+  (01, 03, 05) e fica mais rápida — o backup fica para depois, manual.
+  As 3 opções por tipo (JPG, vídeo, RAW) ficam cinzas enquanto a
+  chave estiver desligada. A escolha é salva na configuração e
+  lembrada na próxima abertura. A análise avisa "Cópias DESLIGADAS"
+  e o espaço necessário passa a contar só o primário.
+
 # Editor Assistente v1.6.0 — ideias do Descarrega (retomada, corrompido, contador zerado, espaço)
 
 - **Retomada persistente:** cada descarga conferida é registrada em

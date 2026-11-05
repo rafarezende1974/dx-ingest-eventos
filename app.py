@@ -49,7 +49,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 JPG_EXTS = {".jpg", ".jpeg"}
 RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".raf", ".dng", ".rw2",
@@ -876,14 +876,24 @@ class App:
 
         opts = ttk.Frame(frm)
         opts.pack(fill="x", pady=4)
+        self.copy_enabled_var = tk.BooleanVar(value=cfg.get("copy_enabled", True))
         self.copy_jpg_var = tk.BooleanVar(value=cfg.get("copy_jpg", True))
         self.copy_video_var = tk.BooleanVar(value=cfg.get("copy_video", True))
         self.copy_raw_var = tk.BooleanVar(value=cfg.get("copy_raw", True))
         self.hash_var = tk.BooleanVar(value=cfg.get("verify_hash", False))
-        ttk.Checkbutton(opts, text="Cópia do JPG (02)", variable=self.copy_jpg_var).pack(side="left", **pad)
-        ttk.Checkbutton(opts, text="Cópia do vídeo (04)", variable=self.copy_video_var).pack(side="left", **pad)
-        ttk.Checkbutton(opts, text="Cópia do RAW (06)", variable=self.copy_raw_var).pack(side="left", **pad)
-        ttk.Checkbutton(opts, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
+        ttk.Checkbutton(opts, text="Fazer cópias em outra unidade (02, 04, 06) — desmarque para descarregar mais rápido e fazer o backup depois",
+                        variable=self.copy_enabled_var).pack(anchor="w", **pad)
+        opts2 = ttk.Frame(frm)
+        opts2.pack(fill="x", pady=0)
+        self.chk_copy_jpg = ttk.Checkbutton(opts2, text="Cópia do JPG (02)", variable=self.copy_jpg_var)
+        self.chk_copy_jpg.pack(side="left", **pad)
+        self.chk_copy_video = ttk.Checkbutton(opts2, text="Cópia do vídeo (04)", variable=self.copy_video_var)
+        self.chk_copy_video.pack(side="left", **pad)
+        self.chk_copy_raw = ttk.Checkbutton(opts2, text="Cópia do RAW (06)", variable=self.copy_raw_var)
+        self.chk_copy_raw.pack(side="left", **pad)
+        ttk.Checkbutton(opts2, text="Verificação completa por hash (mais lenta)", variable=self.hash_var).pack(side="left", **pad)
+        self.copy_enabled_var.trace_add("write", lambda *_a: self._toggle_copy_options())
+        self._toggle_copy_options()
 
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=6)
@@ -1008,6 +1018,18 @@ class App:
         self.log.insert("end", msg + "\n")
         self.log.see("end")
 
+    def _copy_flags(self):
+        """(jpg, vídeo, raw) efetivos: a chave mestra desliga as 3 cópias."""
+        enabled = self.copy_enabled_var.get()
+        return (enabled and self.copy_jpg_var.get(),
+                enabled and self.copy_video_var.get(),
+                enabled and self.copy_raw_var.get())
+
+    def _toggle_copy_options(self):
+        state = "normal" if self.copy_enabled_var.get() else "disabled"
+        for chk in (self.chk_copy_jpg, self.chk_copy_video, self.chk_copy_raw):
+            chk.configure(state=state)
+
     def _save_current_config(self):
         prof = self.prof_var.get().strip()
         profs = list(self.config.get("professionals") or [])
@@ -1017,6 +1039,7 @@ class App:
             "base": self.base_var.get().strip(),
             "event": self.event_var.get().strip(),
             "external_base": self.external_var.get().strip(),
+            "copy_enabled": self.copy_enabled_var.get(),
             "copy_jpg": self.copy_jpg_var.get(),
             "copy_video": self.copy_video_var.get(),
             "copy_raw": self.copy_raw_var.get(),
@@ -1065,9 +1088,10 @@ class App:
         counts = {}
         for _p, kind, _s in self.scan:
             counts[kind] = counts.get(kind, 0) + 1
-        primary, copy_total = split_needed(self.scan, self.copy_jpg_var.get(), self.copy_video_var.get(), self.copy_raw_var.get())
+        _cj, _cv, _cr = self._copy_flags()
+        primary, copy_total = split_needed(self.scan, _cj, _cv, _cr)
         ext_base = self.external_var.get().strip()
-        if ext_base:
+        if ext_base and copy_total > 0:
             d_need, ext_need = primary, copy_total
         else:
             d_need, ext_need = primary + copy_total, 0
@@ -1079,7 +1103,7 @@ class App:
         if jpg_no_raw or raw_no_jpg:
             pair_txt = f"\nAlerta de par: JPG sem RAW={jpg_no_raw}  •  RAW sem JPG={raw_no_jpg}"
         ext_txt = ""
-        if ext_base:
+        if ext_base and copy_total > 0:
             ext_free = free_space_for(ext_base)
             ext_txt = f"\nCópias (02, 04, 06): {fmt_bytes(ext_need)}  •  Livre na pasta de cópias: {fmt_bytes(ext_free) if ext_free is not None else 'não foi possível verificar'}"
         leva_preview = next_leva_number(root, self.prof_var.get().strip())
@@ -1092,11 +1116,11 @@ class App:
         for _path, _kind, _size in self.scan:
             _dests = destinations_for(root, _prof, _copy_root, leva=leva_preview)
             if _kind == "jpg":
-                _key_paths = [_dests["jpg_sync"] / Path(_path).name] + ([_dests["jpg_copy"] / Path(_path).name] if self.copy_jpg_var.get() else [])
+                _key_paths = [_dests["jpg_sync"] / Path(_path).name] + ([_dests["jpg_copy"] / Path(_path).name] if _cj else [])
             elif _kind == "video":
-                _key_paths = [_dests["video_sync"] / Path(_path).name] + ([_dests["video_copy"] / Path(_path).name] if self.copy_video_var.get() else [])
+                _key_paths = [_dests["video_sync"] / Path(_path).name] + ([_dests["video_copy"] / Path(_path).name] if _cv else [])
             else:
-                _key_paths = [_dests["raw_backup"] / Path(_path).name] + ([_dests["raw_copy"] / Path(_path).name] if self.copy_raw_var.get() else [])
+                _key_paths = [_dests["raw_backup"] / Path(_path).name] + ([_dests["raw_copy"] / Path(_path).name] if _cr else [])
             if is_verified(_manifest, manifest_key(_prof, _kind, Path(_path).name, _size), _key_paths, _size, None):
                 self.verified_count += 1
             else:
@@ -1112,7 +1136,7 @@ class App:
         self.preview_var.set(
             f"Encontrados: JPG={counts.get('jpg', 0)}  RAW={counts.get('raw', 0)}  "
             f"Vídeo={counts.get('video', 0)}  Outros ignorados={self.others}\n"
-            f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}{_verified_txt}{_suspect_txt}{_rollover_txt}\n"
+            f"Leva: Cartao_{leva_preview}  •  Primário em D: (01, 03, 05): {fmt_bytes(primary)}  •  Livre em D:: {free_txt}  •  {ok}{pair_txt}{ext_txt}{_verified_txt}{_suspect_txt}{_rollover_txt}" + ("\nCópias DESLIGADAS — só primário (mais rápido); faça o backup manual depois." if not self.copy_enabled_var.get() else "") + f"\n"
             f"Destino primário: {root}"
         )
         # Barra de espaço ao vivo (D: e, se houver, pasta de cópias).
@@ -1177,11 +1201,12 @@ class App:
             dests = destinations_for(root, prof, copy_event_root, leva=leva)
             _suspects_map = {n: r for n, r in corruption_alerts(files, source)}
             _rollover_post, _rollover_warnings = rollover_split(files)
+            _cj, _cv, _cr = self._copy_flags()
             report = process_card(
                 files, dests, root, prof,
-                copy_jpg=self.copy_jpg_var.get(),
-                copy_video=self.copy_video_var.get(),
-                copy_raw=self.copy_raw_var.get(),
+                copy_jpg=_cj,
+                copy_video=_cv,
+                copy_raw=_cr,
                 verify_hash=self.hash_var.get(),
                 log=lambda m: self.msg_queue.put(("log", m)),
                 manifest=manifest,
@@ -1214,18 +1239,19 @@ class App:
             messagebox.showerror("Evento", str(exc))
             return
         primaries, copies = 0, 0
+        _cj, _cv, _cr = self._copy_flags()
         for _s, _p, files, _o in jobs:
-            pr, cp = split_needed(files, self.copy_jpg_var.get(), self.copy_video_var.get(), self.copy_raw_var.get())
+            pr, cp = split_needed(files, _cj, _cv, _cr)
             primaries += pr
             copies += cp
         ext_base = self.external_var.get().strip()
-        d_need = primaries if ext_base else primaries + copies
+        d_need = primaries if (ext_base and copies > 0) else primaries + copies
         free = free_space_for(self.base_var.get().strip())
         if free is not None and free < d_need:
             if not messagebox.askyesno("Espaço", f"Espaço livre em D: ({fmt_bytes(free)}) é menor que o necessário "
                                                  f"({fmt_bytes(d_need)}). Continuar mesmo assim?"):
                 return
-        if ext_base:
+        if ext_base and copies > 0:
             ext_free = free_space_for(ext_base)
             if ext_free is not None and ext_free < copies:
                 if not messagebox.askyesno("Espaço nas cópias", f"Espaço livre na pasta de cópias ({fmt_bytes(ext_free)}) é menor que o necessário "
