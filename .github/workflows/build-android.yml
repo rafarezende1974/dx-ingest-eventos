@@ -39,7 +39,7 @@ jobs:
           script: |
             adb shell wm size 1600x1000
             adb shell wm density 160
-            gradle -p android --no-daemon connectedDebugAndroidTest
+            gradle -p android --no-daemon connectedDebugAndroidTest || { adb exec-out screencap -p > android/app/build/reports/failure.png; adb shell uiautomator dump /sdcard/window.xml; adb pull /sdcard/window.xml android/app/build/reports/window.xml; adb logcat -d > android/app/build/reports/logcat.txt; exit 1; }
             adb shell am start -W -n br.com.editorassistente.android.alpha/br.com.editorassistente.MainActivity
             sleep 3
             adb exec-out screencap -p > android/app/build/reports/android-tablet.png

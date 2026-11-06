@@ -11,6 +11,7 @@ import androidx.test.uiautomator.Until
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import java.util.regex.Pattern
 
 class AndroidFlowTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
@@ -29,7 +30,10 @@ class AndroidFlowTest {
         assertNotNull(providerPackage)
         compose.onAllNodesWithText("Selecionar")[0].performScrollTo().performClick()
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        assertTrue(device.wait(Until.hasObject(By.pkg(providerPackage!!)), 10000))
+        // resolveActivity may identify the system resolver rather than DocumentsUI itself.
+        val picker = By.pkg(Pattern.compile("com\\.(google\\.android|android)\\.documentsui"))
+        assertTrue("Folder picker not visible; foreground=${device.currentPackageName}, resolved=$providerPackage",
+            device.wait(Until.hasObject(picker), 30000))
         device.pressBack()
     }
 
