@@ -41,6 +41,7 @@ jobs:
             adb shell wm density 160
             sleep 15
             gradle -p android --no-daemon connectedDebugAndroidTest || { adb exec-out screencap -p > android/app/build/reports/failure.png; adb shell uiautomator dump /sdcard/window.xml; adb pull /sdcard/window.xml android/app/build/reports/window.xml; adb logcat -d > android/app/build/reports/logcat.txt; exit 1; }
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -W -n br.com.editorassistente.android.alpha/br.com.editorassistente.MainActivity
             sleep 3
             adb exec-out screencap -p > android/app/build/reports/android-tablet.png
