@@ -61,7 +61,12 @@ class MainActivity : ComponentActivity() {
                         if (selecting == "source") 0 else Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     val granted = (result.data?.flags ?: 0) and requested
                     require(granted == requested) { "É necessário autorizar leitura e, nos destinos, gravação." }
-                    contentResolver.takePersistableUriPermission(uri, granted)
+                    if (selecting == "source") {
+                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } else {
+                        contentResolver.takePersistableUriPermission(uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    }
                     prefs().edit().putString(selecting, uri.toString()).apply()
                     when (selecting) {
                         "source" -> source = uri.toString()
