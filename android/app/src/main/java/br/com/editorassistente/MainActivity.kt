@@ -35,7 +35,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFFB465FF), secondary = Color(0xFF15E6D3),
                 background = Color(0xFF0E101B), surface = Color(0xFF1A1C2B))) {
-                Screen()
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Screen()
+                }
             }
         }
     }
